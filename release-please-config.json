@@ -1,0 +1,11 @@
+{
+    "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+    "release-type": "node",
+    "packages": {
+        ".": {
+            "package-name": "@a2anet/openclaw-a2a-plugin",
+            "changelog-path": "CHANGELOG.md",
+            "extra-files": ["src/index.ts"]
+        }
+    }
+}
