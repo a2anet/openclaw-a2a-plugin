@@ -1,7 +1,7 @@
 {
     "name": "@a2anet/openclaw-a2a-plugin",
     "version": "0.1.0",
-    "description": "OpenClaw A2A protocol community plugin. Send messages and files to other agents over the internet, and allow other people to connect to your agent with Tailscale",
+    "description": "A2A protocol plugin for OpenClaw. Send messages to remote A2A agents and allow others to connect to your agent.",
     "type": "module",
     "exports": {
         ".": {
@@ -20,7 +20,10 @@
         "test": "bun test",
         "test:coverage": "bun test --coverage"
     },
-    "keywords": ["a2a", "agent-to-agent", "openclaw", "plugin", "tailscale"],
+    "openclaw": {
+        "extensions": ["./src/index.ts"]
+    },
+    "keywords": ["a2a", "agent-to-agent", "openclaw", "plugin"],
     "author": "A2A Net <hello@a2anet.com>",
     "license": "Apache-2.0",
     "repository": {
@@ -31,9 +34,19 @@
         "url": "https://github.com/a2anet/openclaw-a2a-plugin/issues"
     },
     "homepage": "https://github.com/a2anet/openclaw-a2a-plugin#readme",
+    "dependencies": {
+        "@a2a-js/sdk": "^0.3.10",
+        "@a2anet/a2a-utils": "^0.4.0",
+        "@sinclair/typebox": "^0.34.0",
+        "ws": "^8.19.0"
+    },
+    "peerDependencies": {
+        "openclaw": "*"
+    },
     "devDependencies": {
         "@biomejs/biome": "^1.9.0",
         "@types/bun": "latest",
+        "@types/ws": "^8.0.0",
         "typescript": "^5.7.0"
     },
     "trustedDependencies": ["@biomejs/biome"]

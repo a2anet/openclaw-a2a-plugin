@@ -1,0 +1,85 @@
+{
+    "id": "a2a",
+    "uiHints": {
+        "agents": {
+            "label": "Remote Agents",
+            "help": "Named A2A agents to communicate with. Each key is an agent ID, value is {url, headers?}."
+        },
+        "name": {
+            "label": "Name",
+            "help": "Custom name for the Agent Card (defaults to OpenClaw agent identity name)"
+        },
+        "description": {
+            "label": "Description",
+            "help": "Custom description for the Agent Card"
+        },
+        "skills": {
+            "label": "Skills",
+            "help": "Skills to advertise in the Agent Card. Can also be set at runtime via the a2a_update_agent_card tool."
+        },
+        "inbound": {
+            "label": "Inbound Auth",
+            "help": "Authentication settings for incoming A2A requests"
+        }
+    },
+    "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "gatewayTimeout": { "type": "number" },
+            "agents": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "required": ["url"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "url": { "type": "string" },
+                        "custom_headers": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" }
+                        }
+                    }
+                }
+            },
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["id", "name", "description"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "id": { "type": "string" },
+                        "name": { "type": "string" },
+                        "description": { "type": "string" },
+                        "tags": { "type": "array", "items": { "type": "string" } },
+                        "examples": { "type": "array", "items": { "type": "string" } },
+                        "inputModes": { "type": "array", "items": { "type": "string" } },
+                        "outputModes": { "type": "array", "items": { "type": "string" } }
+                    }
+                }
+            },
+            "inbound": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "allowUnauthenticated": { "type": "boolean" },
+                    "apiKeys": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["label", "key"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "label": { "type": "string" },
+                                "key": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
