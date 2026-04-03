@@ -7,7 +7,7 @@ Send messages and files to other agents over the internet, and/or allow your age
 The plugin is powered by [A2A Utils](https://github.com/a2anet/a2a-utils), a comprehensive set of utility functions for using [A2A servers (remote agents)](https://a2a-protocol.org/latest/topics/key-concepts/#core-actors-in-a2a-interactions), that powers the [A2A MCP Server](https://github.com/a2anet/a2a-mcp).
 
 > [!WARNING]
-> Making your agent publicly accessible means other agents can send it messages. 
+> Making your agent publicly accessible means other agents can send it messages.
 > A malicious agent could attempt to convince your agent to take unwanted actions on your computer, like running commands, reading files, etc.
 > The plugin requires an API key by default.
 > Only share keys with people you trust, and consider using a
@@ -26,6 +26,7 @@ The plugin is powered by [A2A Utils](https://github.com/a2anet/a2a-utils), a com
 
 - **Send messages to remote agents** — 6 outbound tools (`a2a_get_agents`, `a2a_get_agent`, `a2a_send_message`, `a2a_get_task`, `a2a_view_text_artifact`, `a2a_view_data_artifact`) for communicating with any A2A agent
 - **Receive messages from remote agents** — expose your OpenClaw agent as an A2A server with Agent Card discovery, JSON-RPC 2.0 endpoint, and SSE streaming
+- **Send and receive files** — outbound messages can include local file paths (up to 1MB) or URLs; inbound files are saved locally
 - **Multi-turn conversations** — continue conversations across multiple messages using `context_id`
 - **Long-running task support** — if `a2a_send_message` times out, use `a2a_get_task` to monitor until the task reaches a terminal state
 - **Automatic artifact minimization** — large text and data artifacts are automatically minimized for LLM context windows, with dedicated tools for detailed navigation
@@ -33,7 +34,7 @@ The plugin is powered by [A2A Utils](https://github.com/a2anet/a2a-utils), a com
 - **Live Agent Card updates** — update your agent's name, description, and skills at runtime with `a2a_update_agent_card` without restarting
 - **Tailscale integration** — expose your agent to the internet via Tailscale Funnel, or restrict to your tailnet with Tailscale Serve
 - **Custom headers and outbound auth** — per-agent custom headers with `${ENV_VAR}` substitution for secrets
-- **Task and file storage** — tasks and file artifacts are saved locally to `<stateDir>/.a2a-tasks/` and `<stateDir>/.a2a-files/` by default
+- **Configurable timeouts and limits** — control character limits, timeouts, poll intervals, and whether to enable task and file storage
 
 ## 🤖 A2A Core Concepts
 
@@ -75,32 +76,31 @@ Enable the plugin and configure it in your OpenClaw config under `plugins.entrie
       "a2a": {
         "enabled": true,
         "config": {
-          // A2A servers (remote agents) to send messages to
-          "agents": {
-            "weather": {
-              "url": "https://weather-agent.example.com/.well-known/agent-card.json"
-            },
-            "search": {
-              "url": "https://example.com/search-agent/agent-card.json",
-              "custom_headers": {
-                "Authorization": "Bearer ${SEARCH_API_KEY}"
+          "outbound": {
+            "agents": {
+              "weather": {
+                "url": "https://weather-agent.example.com/.well-known/agent-card.json"
+              },
+              "search": {
+                "url": "https://example.com/search-agent/agent-card.json",
+                "custom_headers": {
+                  "Authorization": "Bearer ${SEARCH_API_KEY}"
+                }
               }
             }
           },
-
-          // Customise your Agent Card
-          "name": "My Agent",
-          "description": "A helpful assistant",
-          "skills": [
-            {
-              "id": "chat",
-              "name": "General Chat",
-              "description": "Answer questions and have conversations"
-            }
-          ],
-
-          // Inbound authentication
           "inbound": {
+            "agentCard": {
+              "name": "My Agent",
+              "description": "A helpful assistant",
+              "skills": [
+                {
+                  "id": "chat",
+                  "name": "General Chat",
+                  "description": "Answer questions and have conversations"
+                }
+              ]
+            },
             "apiKeys": [
               { "label": "partner-agent", "key": "your-api-key-here" }
             ]
@@ -116,16 +116,31 @@ Enable the plugin and configure it in your OpenClaw config under `plugins.entrie
 
 All options live under `plugins.entries.a2a.config`:
 
+#### Outbound (`outbound`)
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `agents` | `Record<string, {url, custom_headers?}>` | — | Named remote agents. Keys are agent IDs used in tool calls. |
+| `taskStore` | `boolean` | `true` | Enable persistent task storage. |
+| `fileStore` | `boolean` | `true` | Enable persistent file artifact storage. |
+| `sendMessageCharacterLimit` | `number` | `50000` | Maximum characters for minimized artifact text. |
+| `minimizedObjectStringLength` | `number` | `5000` | Maximum string length for minimized data objects. |
+| `viewArtifactCharacterLimit` | `number` | `50000` | Maximum characters returned by view artifact tools. |
+| `agentCardTimeout` | `number` | `15` | Timeout in seconds for fetching remote agent cards. |
+| `sendMessageTimeout` | `number` | `60` | Timeout in seconds for send message requests. |
+| `getTaskTimeout` | `number` | `60` | Timeout in seconds for get task monitoring. |
+| `getTaskPollInterval` | `number` | `5` | Interval in seconds between task status polls. |
+
+#### Inbound (`inbound`)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `agentCard.name` | `string` | Agent identity name | Agent Card display name. |
+| `agentCard.description` | `string` | `"AI assistant powered by OpenClaw"` | Agent Card description. |
+| `agentCard.skills` | `array` | `[]` | Skills to advertise. Each needs `id`, `name`, `description`. Optional: `tags`, `examples`, `inputModes`, `outputModes`. Can also be set at runtime with `a2a_update_agent_card`. |
+| `apiKeys` | `array` | — | Array of `{ label, key }` objects for inbound auth. |
+| `allowUnauthenticated` | `boolean` | `false` | Skip API key validation for inbound requests. |
 | `gatewayTimeout` | `number` | `300` | Timeout in seconds for gateway calls to the local OpenClaw agent. |
-| `name` | `string` | Agent identity name | Agent Card display name. |
-| `description` | `string` | `"AI assistant powered by OpenClaw"` | Agent Card description. |
-| `skills` | `array` | General Assistant | Skills to advertise. Each needs `id`, `name`, `description`. Optional: `tags`, `examples`, `inputModes`, `outputModes`. Can also be set at runtime with `a2a_update_agent_card`. |
-| `inbound` | `object` | Auth required, no keys | Inbound authentication settings. |
-| `inbound.apiKeys` | `array` | — | Array of `{ label, key }` objects for inbound auth. |
-| `inbound.allowUnauthenticated` | `boolean` | `false` | Skip API key validation for inbound requests. |
 
 ### Outbound Authentication
 
@@ -135,18 +150,20 @@ secrets out of your config file:
 
 ```json
 {
-  "agents": {
-    "partner": {
-      "url": "https://partner-agent.example.com/.well-known/agent-card.json",
-      "custom_headers": {
-        "Authorization": "Bearer ${PARTNER_API_KEY}",
-      },
-    },
-  },
+  "outbound": {
+    "agents": {
+      "partner": {
+        "url": "https://partner-agent.example.com/.well-known/agent-card.json",
+        "custom_headers": {
+          "Authorization": "Bearer ${PARTNER_API_KEY}"
+        }
+      }
+    }
+  }
 }
 ```
 
-## 📤 Sending Messages
+## 📤 Sending Messages (outbound)
 
 Enable the plugin, configure at least one remote agent, and your OpenClaw agent
 can send messages and files to any A2A-compatible agent — no Tailscale or port exposure needed. You just need the remote agent's Agent Card URL (and API key, if required).
@@ -182,6 +199,8 @@ progress after the timeout, the current task state is returned. Use
 | `context_id` | string | No | Continue an existing multi-turn conversation |
 | `task_id` | string | No | Attach to an existing task (for `input_required` flows) |
 | `timeout` | number | No | Override default timeout in seconds |
+| `data` | array | No | Structured data to include with the message. Each item is sent as a separate JSON object or array alongside the text. |
+| `files` | array | No | Files to include with the message. Accepts local file paths (read and sent as binary, max 1MB) or URLs (sent as references for the remote agent to fetch). |
 
 #### `a2a_get_task`
 
@@ -343,6 +362,17 @@ a2a_send_message(agent_id: "tweet-search", message: "Find tweets about AI from t
 }
 ```
 
+#### Send a message with data and files
+
+```
+a2a_send_message(
+  agent_id: "analyst",
+  message: "Analyze this sales data and the attached report",
+  data: [{"quarter": "Q1", "revenue": 1500000}],
+  files: ["/path/to/report.pdf", "https://example.com/data.csv"]
+)
+```
+
 #### Multi-turn conversation
 
 Use `contextId` from a previous response to continue the conversation:
@@ -467,7 +497,7 @@ a2a_view_data_artifact(
 }
 ```
 
-## 📥 Receiving Messages
+## 📥 Receiving Messages (inbound)
 
 Other A2A agents can discover and message your OpenClaw agent through the inbound
 endpoints. Follow this checklist to make your agent reachable.
@@ -730,10 +760,16 @@ Restart the gateway after generating or revoking keys to apply changes.
 
 ## 💾 Data Storage
 
-Outbound Tasks and file Artifacts are saved locally within OpenClaw's state directory:
+Tasks and file artifacts are saved locally within OpenClaw's state directory, separated by direction:
 
-- **Tasks**: `<stateDir>/a2a-tasks/`
-- **Files**: `<stateDir>/a2a-files/`
+| Direction | Type | Path |
+|-----------|------|------|
+| Outbound | Tasks | `<stateDir>/a2a/outbound/tasks/` |
+| Outbound | Files | `<stateDir>/a2a/outbound/files/` |
+| Inbound | Tasks | `<stateDir>/a2a/inbound/tasks/` |
+| Inbound | Files | `<stateDir>/a2a/inbound/files/` |
+
+Outbound task/file storage can be disabled with `outbound.taskStore: false` and `outbound.fileStore: false`.
 
 ## 🛠️ Development
 

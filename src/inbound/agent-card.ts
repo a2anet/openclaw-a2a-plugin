@@ -58,9 +58,10 @@ export function buildAgentCard(params: BuildAgentCardParams): AgentCard {
     const { openclawConfig, pluginConfig, publicUrl, authRequired } = params;
     const agentId = params.agentId ?? "main";
 
+    const agentCardConfig = pluginConfig.inbound?.agentCard;
     const agentName = resolveAgentName(openclawConfig, agentId);
-    const name = pluginConfig.name ?? agentName ?? `OpenClaw Agent (${agentId})`;
-    const description = pluginConfig.description ?? "AI assistant powered by OpenClaw";
+    const name = agentCardConfig?.name ?? agentName ?? `OpenClaw Agent (${agentId})`;
+    const description = agentCardConfig?.description ?? "AI assistant powered by OpenClaw";
     const baseUrl = publicUrl.replace(/\/$/, "");
 
     const card: AgentCard = {
@@ -75,7 +76,7 @@ export function buildAgentCard(params: BuildAgentCardParams): AgentCard {
         },
         defaultInputModes: ["text"],
         defaultOutputModes: ["text"],
-        skills: buildSkills(pluginConfig.skills),
+        skills: buildSkills(agentCardConfig?.skills),
     };
 
     if (authRequired) {

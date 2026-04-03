@@ -79,7 +79,7 @@ export async function callGateway<T = Record<string, unknown>>(params: {
                         },
                         auth: gatewayToken ? { token: gatewayToken } : undefined,
                         role: "operator",
-                        scopes: ["operator.admin"],
+                        scopes: ["operator.read", "operator.write", "operator.admin"],
                     },
                 }),
             );

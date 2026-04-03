@@ -31,10 +31,14 @@ describe("plugin definition", () => {
 
     test("config schema parse handles valid config", () => {
         const result = plugin.configSchema.parse({
-            agents: { test: { url: "https://example.com" } },
-            name: "Test",
+            outbound: {
+                agents: { test: { url: "https://example.com" } },
+            },
+            inbound: {
+                agentCard: { name: "Test" },
+            },
         });
-        expect(result.name).toBe("Test");
-        expect(result.agents?.test?.url).toBe("https://example.com");
+        expect(result.inbound?.agentCard?.name).toBe("Test");
+        expect(result.outbound?.agents?.test?.url).toBe("https://example.com");
     });
 });

@@ -4,14 +4,15 @@
 
 import { Type } from "@sinclair/typebox";
 
-import { type A2APluginConfig, buildRootConfigWithA2A } from "../config.js";
+import type { A2AAgentCardConfig } from "../config.js";
+import { buildRootConfigWithA2A } from "../config.js";
 import { type AgentTool, jsonResult } from "../types.js";
 
 export type UpdateAgentCardDeps = {
     loadConfig: () => Promise<Record<string, unknown>>;
     writeConfigFile: (config: Record<string, unknown>) => Promise<void>;
     /** Called after config is written to update the in-memory agent card. */
-    updateLiveCard: (patch: Partial<A2APluginConfig>) => void;
+    updateLiveCard: (patch: Partial<A2AAgentCardConfig>) => void;
 };
 
 /**
@@ -20,7 +21,7 @@ export type UpdateAgentCardDeps = {
 export function createUpdateAgentCardTool(deps: UpdateAgentCardDeps): AgentTool {
     return {
         name: "a2a_update_agent_card",
-        label: "A2A: Update Agent Card",
+        label: "a2a_update_agent_card",
         description:
             "Update this agent's A2A Agent Card. Changes take effect immediately for " +
             "incoming discovery requests, and are persisted to config. " +
@@ -54,7 +55,7 @@ export function createUpdateAgentCardTool(deps: UpdateAgentCardDeps): AgentTool 
                 });
             }
 
-            const patch: Partial<A2APluginConfig> = {};
+            const patch: Partial<A2AAgentCardConfig> = {};
             if (name) {
                 patch.name = name;
             }
@@ -72,9 +73,13 @@ export function createUpdateAgentCardTool(deps: UpdateAgentCardDeps): AgentTool 
             }
 
             try {
-                // Persist to config file
+                // Persist to config file under inbound.agentCard
                 const currentConfig = await deps.loadConfig();
-                await deps.writeConfigFile(buildRootConfigWithA2A(currentConfig, patch));
+                await deps.writeConfigFile(
+                    buildRootConfigWithA2A(currentConfig, {
+                        inbound: { agentCard: patch },
+                    }),
+                );
 
                 // Update in-memory card
                 deps.updateLiveCard(patch);

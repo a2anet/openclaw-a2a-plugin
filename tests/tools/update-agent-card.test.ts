@@ -11,7 +11,11 @@ function makeDeps(existingConfig?: Record<string, unknown>) {
         plugins: {
             entries: {
                 a2a: {
-                    config: { name: "Original" },
+                    config: {
+                        inbound: {
+                            agentCard: { name: "Original" },
+                        },
+                    },
                 },
             },
         },
@@ -51,13 +55,15 @@ describe("createUpdateAgentCardTool", () => {
         expect(deps.writeConfigFile).toHaveBeenCalledTimes(1);
         expect(deps.updateLiveCard).toHaveBeenCalledTimes(1);
 
-        // Check the written config has the name merged in
+        // Check the written config has the name under inbound.agentCard
         const written = deps.getWritten() as Record<string, unknown>;
         const plugins = written.plugins as Record<string, unknown>;
         const entries = plugins.entries as Record<string, unknown>;
         const a2a = entries.a2a as Record<string, unknown>;
         const config = a2a.config as Record<string, unknown>;
-        expect(config.name).toBe("New Name");
+        const inbound = config.inbound as Record<string, unknown>;
+        const agentCard = inbound.agentCard as Record<string, unknown>;
+        expect(agentCard.name).toBe("New Name");
     });
 
     test("updates description successfully", async () => {
@@ -115,7 +121,13 @@ describe("createUpdateAgentCardTool", () => {
                     otherEntry: {},
                     a2a: {
                         enabled: true,
-                        config: { name: "Old", description: "Old desc", agents: {} },
+                        config: {
+                            outbound: { agents: {} },
+                            inbound: {
+                                agentCard: { name: "Old", description: "Old desc" },
+                                apiKeys: [{ label: "alice", key: "abc" }],
+                            },
+                        },
                     },
                 },
             },
@@ -132,7 +144,11 @@ describe("createUpdateAgentCardTool", () => {
         const a2a = entries.a2a as Record<string, unknown>;
         expect(a2a.enabled).toBe(true);
         const config = a2a.config as Record<string, unknown>;
-        expect(config.name).toBe("Updated");
-        expect(config.agents).toBeDefined();
+        expect(config.outbound).toBeDefined();
+        const inbound = config.inbound as Record<string, unknown>;
+        const agentCard = inbound.agentCard as Record<string, unknown>;
+        expect(agentCard.name).toBe("Updated");
+        // apiKeys should be preserved via deep merge
+        expect(inbound.apiKeys).toEqual([{ label: "alice", key: "abc" }]);
     });
 });

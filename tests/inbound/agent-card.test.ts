@@ -12,10 +12,10 @@ describe("buildAgentCard", () => {
         publicUrl: "https://example.com",
     };
 
-    test("uses plugin config name when set", () => {
+    test("uses inbound agentCard name when set", () => {
         const card = buildAgentCard({
             ...baseParams,
-            pluginConfig: { name: "Custom Name" },
+            pluginConfig: { inbound: { agentCard: { name: "Custom Name" } } },
         });
         expect(card.name).toBe("Custom Name");
     });
@@ -83,11 +83,15 @@ describe("buildAgentCard", () => {
         expect(card.capabilities?.pushNotifications).toBe(false);
     });
 
-    test("builds skills from plugin config", () => {
+    test("builds skills from inbound agentCard config", () => {
         const card = buildAgentCard({
             ...baseParams,
             pluginConfig: {
-                skills: [{ id: "chat", name: "Chat", description: "General chat" }],
+                inbound: {
+                    agentCard: {
+                        skills: [{ id: "chat", name: "Chat", description: "General chat" }],
+                    },
+                },
             },
         });
         expect(card.skills).toHaveLength(1);
@@ -97,6 +101,21 @@ describe("buildAgentCard", () => {
     test("returns empty skills when none configured", () => {
         const card = buildAgentCard(baseParams);
         expect(card.skills).toEqual([]);
+    });
+
+    test("uses inbound agentCard description", () => {
+        const card = buildAgentCard({
+            ...baseParams,
+            pluginConfig: {
+                inbound: { agentCard: { description: "My custom description" } },
+            },
+        });
+        expect(card.description).toBe("My custom description");
+    });
+
+    test("falls back to default description", () => {
+        const card = buildAgentCard(baseParams);
+        expect(card.description).toBe("AI assistant powered by OpenClaw");
     });
 
     test("adds security schemes when auth required", () => {

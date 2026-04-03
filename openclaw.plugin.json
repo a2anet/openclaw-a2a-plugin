@@ -1,70 +1,99 @@
 {
     "id": "a2a",
     "uiHints": {
-        "agents": {
+        "outbound": {
+            "label": "Outbound",
+            "help": "Settings for sending messages to remote A2A agents"
+        },
+        "outbound.agents": {
             "label": "Remote Agents",
             "help": "Named A2A agents to communicate with. Each key is an agent ID, value is {url, headers?}."
         },
-        "name": {
-            "label": "Name",
-            "help": "Custom name for the Agent Card (defaults to OpenClaw agent identity name)"
-        },
-        "description": {
-            "label": "Description",
-            "help": "Custom description for the Agent Card"
-        },
-        "skills": {
-            "label": "Skills",
-            "help": "Skills to advertise in the Agent Card. Can also be set at runtime via the a2a_update_agent_card tool."
-        },
         "inbound": {
-            "label": "Inbound Auth",
-            "help": "Authentication settings for incoming A2A requests"
+            "label": "Inbound",
+            "help": "Settings for receiving messages from remote A2A agents"
+        },
+        "inbound.agentCard": {
+            "label": "Agent Card",
+            "help": "Customise how your agent appears to other agents"
+        },
+        "inbound.apiKeys": {
+            "label": "API Keys",
+            "help": "Authentication keys for incoming A2A requests"
         }
     },
     "configSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "gatewayTimeout": { "type": "number" },
-            "agents": {
+            "outbound": {
                 "type": "object",
-                "additionalProperties": {
-                    "type": "object",
-                    "required": ["url"],
-                    "additionalProperties": false,
-                    "properties": {
-                        "url": { "type": "string" },
-                        "custom_headers": {
+                "additionalProperties": false,
+                "properties": {
+                    "agents": {
+                        "type": "object",
+                        "additionalProperties": {
                             "type": "object",
-                            "additionalProperties": { "type": "string" }
+                            "required": ["url"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "url": { "type": "string" },
+                                "custom_headers": {
+                                    "type": "object",
+                                    "additionalProperties": { "type": "string" }
+                                }
+                            }
                         }
-                    }
-                }
-            },
-            "name": { "type": "string" },
-            "description": { "type": "string" },
-            "skills": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": ["id", "name", "description"],
-                    "additionalProperties": false,
-                    "properties": {
-                        "id": { "type": "string" },
-                        "name": { "type": "string" },
-                        "description": { "type": "string" },
-                        "tags": { "type": "array", "items": { "type": "string" } },
-                        "examples": { "type": "array", "items": { "type": "string" } },
-                        "inputModes": { "type": "array", "items": { "type": "string" } },
-                        "outputModes": { "type": "array", "items": { "type": "string" } }
-                    }
+                    },
+                    "taskStore": { "type": "boolean" },
+                    "fileStore": { "type": "boolean" },
+                    "sendMessageCharacterLimit": { "type": "number" },
+                    "minimizedObjectStringLength": { "type": "number" },
+                    "viewArtifactCharacterLimit": { "type": "number" },
+                    "agentCardTimeout": { "type": "number" },
+                    "sendMessageTimeout": { "type": "number" },
+                    "getTaskTimeout": { "type": "number" },
+                    "getTaskPollInterval": { "type": "number" }
                 }
             },
             "inbound": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                    "agentCard": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "name": { "type": "string" },
+                            "description": { "type": "string" },
+                            "skills": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["id", "name", "description"],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "id": { "type": "string" },
+                                        "name": { "type": "string" },
+                                        "description": { "type": "string" },
+                                        "tags": { "type": "array", "items": { "type": "string" } },
+                                        "examples": {
+                                            "type": "array",
+                                            "items": { "type": "string" }
+                                        },
+                                        "inputModes": {
+                                            "type": "array",
+                                            "items": { "type": "string" }
+                                        },
+                                        "outputModes": {
+                                            "type": "array",
+                                            "items": { "type": "string" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
                     "allowUnauthenticated": { "type": "boolean" },
                     "apiKeys": {
                         "type": "array",
@@ -77,7 +106,8 @@
                                 "key": { "type": "string" }
                             }
                         }
-                    }
+                    },
+                    "gatewayTimeout": { "type": "number" }
                 }
             }
         }

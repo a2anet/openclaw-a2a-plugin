@@ -188,4 +188,121 @@ describe("OpenClawExecutor", () => {
 
         expect(capturedParams.message).toBe("Part 1\nPart 2");
     });
+
+    test("includes data parts as XML tags", async () => {
+        let capturedParams: Record<string, unknown> = {};
+        const callGateway = mock(async (params: { params?: Record<string, unknown> }) => {
+            capturedParams = params.params ?? {};
+            return {
+                ok: true as const,
+                data: { result: { payloads: [{ text: "OK" }] } },
+            };
+        });
+
+        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
+        const eventBus = makeEventBus();
+        const ctx = makeContext({
+            userMessage: {
+                role: "user",
+                messageId: crypto.randomUUID(),
+                parts: [
+                    { kind: "text", text: "Process this data" },
+                    { kind: "data", data: { key: "value" } },
+                ],
+            } as Message,
+        });
+        await executor.execute(ctx, eventBus);
+
+        const message = capturedParams.message as string;
+        expect(message).toContain("Process this data");
+        expect(message).toContain("<data>");
+        expect(message).toContain("<item>");
+        expect(message).toContain('"key": "value"');
+        expect(message).toContain("</item>");
+        expect(message).toContain("</data>");
+    });
+
+    test("includes mediaUrl as file parts in artifact", async () => {
+        const callGateway = mock(async () => ({
+            ok: true as const,
+            data: {
+                result: {
+                    payloads: [
+                        { text: "Here is an image", mediaUrl: "https://example.com/image.png" },
+                    ],
+                },
+            },
+        }));
+
+        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
+        const eventBus = makeEventBus();
+        await executor.execute(makeContext(), eventBus);
+
+        const artifactEvent = eventBus.events[1] as Record<string, unknown>;
+        expect(artifactEvent.kind).toBe("artifact-update");
+        const artifact = artifactEvent.artifact as Record<string, unknown>;
+        const parts = artifact.parts as Array<Record<string, unknown>>;
+        expect(parts).toHaveLength(2);
+        expect(parts[0].kind).toBe("text");
+        expect(parts[1].kind).toBe("file");
+        const fileObj = parts[1].file as Record<string, unknown>;
+        expect(fileObj.uri).toBe("https://example.com/image.png");
+    });
+
+    test("saves file parts via fileStore", async () => {
+        const savedMessages: Message[] = [];
+        const mockFileStore = {
+            saveMessage: mock(async (msg: Message) => {
+                savedMessages.push(msg);
+                return ["/tmp/saved/file.pdf"];
+            }),
+            getMessage: mock(async () => []),
+            deleteMessage: mock(async () => {}),
+            saveArtifact: mock(async () => []),
+            getArtifact: mock(async () => []),
+            deleteArtifact: mock(async () => {}),
+        };
+
+        let capturedParams: Record<string, unknown> = {};
+        const callGateway = mock(async (params: { params?: Record<string, unknown> }) => {
+            capturedParams = params.params ?? {};
+            return {
+                ok: true as const,
+                data: { result: { payloads: [{ text: "OK" }] } },
+            };
+        });
+
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            callGateway,
+            fileStore: mockFileStore,
+        });
+        const eventBus = makeEventBus();
+        const ctx = makeContext({
+            userMessage: {
+                role: "user",
+                messageId: "msg-123",
+                parts: [
+                    { kind: "text", text: "Here is a file" },
+                    {
+                        kind: "file",
+                        file: {
+                            name: "file.pdf",
+                            mimeType: "application/pdf",
+                            bytes: Buffer.from("content").toString("base64"),
+                        },
+                    },
+                ],
+            } as Message,
+        });
+        await executor.execute(ctx, eventBus);
+
+        expect(mockFileStore.saveMessage).toHaveBeenCalledTimes(1);
+        const message = capturedParams.message as string;
+        expect(message).toContain("Here is a file");
+        expect(message).toContain("<files>");
+        expect(message).toContain('<file name="file.pdf">');
+        expect(message).toContain("/tmp/saved/file.pdf");
+        expect(message).toContain("</files>");
+    });
 });

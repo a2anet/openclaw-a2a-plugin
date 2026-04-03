@@ -20,18 +20,35 @@ export type A2AInboundKey = {
     key: string;
 };
 
-export type A2AInboundConfig = {
-    allowUnauthenticated?: boolean;
-    apiKeys?: A2AInboundKey[];
-};
-
-export type A2APluginConfig = {
-    agents?: Record<string, A2AAgentEntry>;
+export type A2AAgentCardConfig = {
     name?: string;
     description?: string;
     skills?: A2ASkillConfig[];
-    inbound?: A2AInboundConfig;
+};
+
+export type A2AOutboundConfig = {
+    agents?: Record<string, A2AAgentEntry>;
+    taskStore?: boolean;
+    fileStore?: boolean;
+    sendMessageCharacterLimit?: number;
+    minimizedObjectStringLength?: number;
+    viewArtifactCharacterLimit?: number;
+    agentCardTimeout?: number;
+    sendMessageTimeout?: number;
+    getTaskTimeout?: number;
+    getTaskPollInterval?: number;
+};
+
+export type A2AInboundConfig = {
+    agentCard?: A2AAgentCardConfig;
+    allowUnauthenticated?: boolean;
+    apiKeys?: A2AInboundKey[];
     gatewayTimeout?: number;
+};
+
+export type A2APluginConfig = {
+    outbound?: A2AOutboundConfig;
+    inbound?: A2AInboundConfig;
 };
 
 function parseStringArray(value: unknown): string[] | undefined {
@@ -82,41 +99,6 @@ function parseSkills(value: unknown): A2ASkillConfig[] | undefined {
     return result.length > 0 ? result : undefined;
 }
 
-function parseInbound(value: unknown): A2AInboundConfig | undefined {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return undefined;
-    }
-    const raw = value as Record<string, unknown>;
-    const allowUnauthenticated =
-        typeof raw.allowUnauthenticated === "boolean" ? raw.allowUnauthenticated : undefined;
-    let apiKeys: A2AInboundKey[] | undefined;
-    if (Array.isArray(raw.apiKeys)) {
-        apiKeys = [];
-        for (const entry of raw.apiKeys) {
-            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-                continue;
-            }
-            const e = entry as Record<string, unknown>;
-            const label = typeof e.label === "string" ? e.label.trim() : "";
-            const key = typeof e.key === "string" ? e.key : "";
-            if (!label || !key) {
-                continue;
-            }
-            apiKeys.push({ label, key });
-        }
-        if (apiKeys.length === 0) {
-            apiKeys = undefined;
-        }
-    }
-    if (allowUnauthenticated === undefined && apiKeys === undefined) {
-        return undefined;
-    }
-    return {
-        ...(allowUnauthenticated !== undefined ? { allowUnauthenticated } : {}),
-        ...(apiKeys ? { apiKeys } : {}),
-    };
-}
-
 function parseAgents(value: unknown): Record<string, A2AAgentEntry> | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return undefined;
@@ -153,28 +135,121 @@ function parseAgents(value: unknown): Record<string, A2AAgentEntry> | undefined 
     return Object.keys(result).length > 0 ? result : undefined;
 }
 
+function parsePositiveNumber(value: unknown): number | undefined {
+    return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+function parseApiKeys(value: unknown): A2AInboundKey[] | undefined {
+    if (!Array.isArray(value)) {
+        return undefined;
+    }
+    const keys: A2AInboundKey[] = [];
+    for (const entry of value) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            continue;
+        }
+        const e = entry as Record<string, unknown>;
+        const label = typeof e.label === "string" ? e.label.trim() : "";
+        const key = typeof e.key === "string" ? e.key : "";
+        if (!label || !key) {
+            continue;
+        }
+        keys.push({ label, key });
+    }
+    return keys.length > 0 ? keys : undefined;
+}
+
+function parseAgentCard(value: unknown): A2AAgentCardConfig | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const raw = value as Record<string, unknown>;
+    const name = typeof raw.name === "string" ? raw.name.trim() || undefined : undefined;
+    const description =
+        typeof raw.description === "string" ? raw.description.trim() || undefined : undefined;
+    const skills = parseSkills(raw.skills);
+    if (name === undefined && description === undefined && skills === undefined) {
+        return undefined;
+    }
+    return {
+        ...(name ? { name } : {}),
+        ...(description ? { description } : {}),
+        ...(skills ? { skills } : {}),
+    };
+}
+
+function parseOutbound(value: unknown): A2AOutboundConfig | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const raw = value as Record<string, unknown>;
+    const agents = parseAgents(raw.agents);
+    const taskStore = typeof raw.taskStore === "boolean" ? raw.taskStore : undefined;
+    const fileStore = typeof raw.fileStore === "boolean" ? raw.fileStore : undefined;
+    const sendMessageCharacterLimit = parsePositiveNumber(raw.sendMessageCharacterLimit);
+    const minimizedObjectStringLength = parsePositiveNumber(raw.minimizedObjectStringLength);
+    const viewArtifactCharacterLimit = parsePositiveNumber(raw.viewArtifactCharacterLimit);
+    const agentCardTimeout = parsePositiveNumber(raw.agentCardTimeout);
+    const sendMessageTimeout = parsePositiveNumber(raw.sendMessageTimeout);
+    const getTaskTimeout = parsePositiveNumber(raw.getTaskTimeout);
+    const getTaskPollInterval = parsePositiveNumber(raw.getTaskPollInterval);
+
+    const result: A2AOutboundConfig = {};
+    if (agents) result.agents = agents;
+    if (taskStore !== undefined) result.taskStore = taskStore;
+    if (fileStore !== undefined) result.fileStore = fileStore;
+    if (sendMessageCharacterLimit !== undefined)
+        result.sendMessageCharacterLimit = sendMessageCharacterLimit;
+    if (minimizedObjectStringLength !== undefined)
+        result.minimizedObjectStringLength = minimizedObjectStringLength;
+    if (viewArtifactCharacterLimit !== undefined)
+        result.viewArtifactCharacterLimit = viewArtifactCharacterLimit;
+    if (agentCardTimeout !== undefined) result.agentCardTimeout = agentCardTimeout;
+    if (sendMessageTimeout !== undefined) result.sendMessageTimeout = sendMessageTimeout;
+    if (getTaskTimeout !== undefined) result.getTaskTimeout = getTaskTimeout;
+    if (getTaskPollInterval !== undefined) result.getTaskPollInterval = getTaskPollInterval;
+
+    return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function parseInbound(value: unknown): A2AInboundConfig | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const raw = value as Record<string, unknown>;
+    const agentCard = parseAgentCard(raw.agentCard);
+    const allowUnauthenticated =
+        typeof raw.allowUnauthenticated === "boolean" ? raw.allowUnauthenticated : undefined;
+    const apiKeys = parseApiKeys(raw.apiKeys);
+    const gatewayTimeout = parsePositiveNumber(raw.gatewayTimeout);
+
+    if (
+        agentCard === undefined &&
+        allowUnauthenticated === undefined &&
+        apiKeys === undefined &&
+        gatewayTimeout === undefined
+    ) {
+        return undefined;
+    }
+    return {
+        ...(agentCard ? { agentCard } : {}),
+        ...(allowUnauthenticated !== undefined ? { allowUnauthenticated } : {}),
+        ...(apiKeys ? { apiKeys } : {}),
+        ...(gatewayTimeout !== undefined ? { gatewayTimeout } : {}),
+    };
+}
+
 export function parseA2APluginConfig(value: unknown): A2APluginConfig {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return {};
     }
     const raw = value as Record<string, unknown>;
-    const agents = parseAgents(raw.agents);
+    const outbound = parseOutbound(raw.outbound);
     const inbound = parseInbound(raw.inbound);
-    const skills = parseSkills(raw.skills);
-
-    const gatewayTimeout =
-        typeof raw.gatewayTimeout === "number" && raw.gatewayTimeout > 0
-            ? raw.gatewayTimeout
-            : undefined;
 
     return {
-        ...(agents ? { agents } : {}),
-        name: typeof raw.name === "string" ? raw.name.trim() || undefined : undefined,
-        description:
-            typeof raw.description === "string" ? raw.description.trim() || undefined : undefined,
-        ...(skills ? { skills } : {}),
+        ...(outbound ? { outbound } : {}),
         ...(inbound ? { inbound } : {}),
-        ...(gatewayTimeout ? { gatewayTimeout } : {}),
     };
 }
 
@@ -197,19 +272,54 @@ export function extractA2AEntry(rootConfig: Record<string, unknown>): {
 
 /**
  * Build a new root config with updated A2A plugin config merged in.
+ * Performs a deep merge on the `inbound` key to preserve sibling fields
+ * (e.g. updating `inbound.agentCard` without clobbering `inbound.apiKeys`).
  */
 export function buildRootConfigWithA2A(
     rootConfig: Record<string, unknown>,
     a2aConfigUpdate: Record<string, unknown>,
 ): Record<string, unknown> {
     const { pluginsEntries, a2aEntry, a2aConfig } = extractA2AEntry(rootConfig);
+
+    // Deep merge inbound so that updating agentCard doesn't clobber apiKeys,
+    // and updating a single agentCard field doesn't clobber sibling card fields.
+    let merged: Record<string, unknown>;
+    if (a2aConfigUpdate.inbound && a2aConfig.inbound) {
+        const { inbound: inboundUpdate, ...rest } = a2aConfigUpdate;
+        const existingInbound = a2aConfig.inbound as Record<string, unknown>;
+        const nextInbound = inboundUpdate as Record<string, unknown>;
+
+        let mergedInbound: Record<string, unknown> = {
+            ...existingInbound,
+            ...nextInbound,
+        };
+
+        if (existingInbound.agentCard && nextInbound.agentCard) {
+            mergedInbound = {
+                ...mergedInbound,
+                agentCard: {
+                    ...(existingInbound.agentCard as Record<string, unknown>),
+                    ...(nextInbound.agentCard as Record<string, unknown>),
+                },
+            };
+        }
+
+        merged = {
+            ...a2aConfig,
+            ...rest,
+            inbound: mergedInbound,
+        };
+    } else {
+        merged = { ...a2aConfig, ...a2aConfigUpdate };
+    }
+
     return {
         ...rootConfig,
         plugins: {
             ...(rootConfig.plugins as Record<string, unknown>),
             entries: {
                 ...pluginsEntries,
-                a2a: { ...a2aEntry, config: { ...a2aConfig, ...a2aConfigUpdate } },
+                a2a: { ...a2aEntry, config: merged },
             },
         },
     };
