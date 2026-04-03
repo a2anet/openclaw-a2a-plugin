@@ -774,13 +774,19 @@ Outbound task/file storage can be disabled with `outbound.taskStore: false` and 
 ## 🛠️ Development
 
 ```bash
-bun install              # Install dependencies
-bun run check            # Lint and format (Biome)
-bun run typecheck        # Type check (TypeScript)
-bun test                 # Run tests
-bun test --coverage      # Run tests with coverage
+make install             # Install dependencies
+make install-hooks       # Install local git hooks
+make ci                  # Lint, typecheck, and test with coverage
+make fix                 # Auto-fix formatting and lint issues
 bun run build            # Compile to dist/
 ```
+
+The local git hooks mirror the shared project template workflow:
+
+- `.githooks/pre-commit` runs `make fix` and re-stages tracked changes
+- `.githooks/pre-push` runs `make ci`
+
+They are optional but recommended for contributors working on this repo locally.
 
 ## 📄 License
 

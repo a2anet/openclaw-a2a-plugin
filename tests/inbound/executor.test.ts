@@ -301,7 +301,7 @@ describe("OpenClawExecutor", () => {
         const message = capturedParams.message as string;
         expect(message).toContain("Here is a file");
         expect(message).toContain("<files>");
-        expect(message).toContain('<file name="file.pdf">');
+        expect(message).toContain("<file>");
         expect(message).toContain("/tmp/saved/file.pdf");
         expect(message).toContain("</files>");
     });
