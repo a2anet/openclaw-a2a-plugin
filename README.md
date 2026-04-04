@@ -65,126 +65,305 @@ cd ~/.openclaw/extensions/a2a && npm install
 
 Then restart the gateway.
 
-## ⚙️ Configuration
+## ⚙️ Set Up
 
-Enable the plugin and configure it in your OpenClaw config under `plugins.entries.a2a`:
+### Sending Messages (outbound)
+
+Configure at least one remote agent in your OpenClaw config. You just need the
+remote agent's Agent Card URL (and API key, if required). No Tailscale or port
+exposure needed.
 
 ```json
 {
-  "plugins": {
-    "entries": {
-      "a2a": {
-        "enabled": true,
-        "config": {
-          "outbound": {
-            "agents": {
-              "weather": {
-                "url": "https://weather-agent.example.com/.well-known/agent-card.json"
-              },
-              "search": {
-                "url": "https://example.com/search-agent/agent-card.json",
-                "custom_headers": {
-                  "Authorization": "Bearer ${SEARCH_API_KEY}"
+    "tools": {
+        "profile": "full"
+    },
+    "plugins": {
+        "entries": {
+            "a2a": {
+                "enabled": true,
+                "config": {
+                    "outbound": {
+                        "agents": {
+                            "weather": {
+                                "url": "https://weather-agent.example.com/.well-known/agent-card.json"
+                            },
+                            "search": {
+                                "url": "https://example.com/search-agent/agent-card.json",
+                                "custom_headers": {
+                                    "Authorization": "Bearer ${SEARCH_API_KEY}"
+                                }
+                            }
+                        }
+                    }
                 }
-              }
             }
-          },
-          "inbound": {
-            "agentCard": {
-              "name": "My Agent",
-              "description": "A helpful assistant",
-              "skills": [
-                {
-                  "id": "chat",
-                  "name": "General Chat",
-                  "description": "Answer questions and have conversations"
-                }
-              ]
-            },
-            "apiKeys": [
-              { "label": "partner-agent", "key": "your-api-key-here" }
-            ]
-          }
         }
-      }
+    },
+    "sandbox": {
+        "tools": {
+            "alsoAllow": [
+                "a2a_get_agents",
+                "a2a_get_agent",
+                "a2a_send_message",
+                "a2a_get_task",
+                "a2a_view_text_artifact",
+                "a2a_view_data_artifact"
+            ]
+        }
     }
-  }
 }
 ```
 
-### Configuration Reference
+> **Note:** The "sandbox" section is only required if sandbox is enabled.
 
-All options live under `plugins.entries.a2a.config`:
+Header values support `${ENV_VAR}` substitution so you can keep secrets out of
+your config file.
 
-#### Outbound (`outbound`)
+#### Outbound Configuration Reference
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `agents` | `Record<string, {url, custom_headers?}>` | — | Named remote agents. Keys are agent IDs used in tool calls. |
-| `taskStore` | `boolean` | `true` | Enable persistent task storage. |
-| `fileStore` | `boolean` | `true` | Enable persistent file artifact storage. |
-| `sendMessageCharacterLimit` | `number` | `50000` | Maximum characters for minimized artifact text. |
-| `minimizedObjectStringLength` | `number` | `5000` | Maximum string length for minimized data objects. |
-| `viewArtifactCharacterLimit` | `number` | `50000` | Maximum characters returned by view artifact tools. |
-| `agentCardTimeout` | `number` | `15` | Timeout in seconds for fetching remote agent cards. |
-| `sendMessageTimeout` | `number` | `60` | Timeout in seconds for send message requests. |
-| `getTaskTimeout` | `number` | `60` | Timeout in seconds for get task monitoring. |
-| `getTaskPollInterval` | `number` | `5` | Interval in seconds between task status polls. |
+All options live under `plugins.entries.a2a.config.outbound`:
 
-#### Inbound (`inbound`)
+| Field                         | Type                                     | Default | Description                                                 |
+| ----------------------------- | ---------------------------------------- | ------- | ----------------------------------------------------------- |
+| `agents`                      | `Record<string, {url, custom_headers?}>` | —       | Named remote agents. Keys are agent IDs used in tool calls. |
+| `taskStore`                   | `boolean`                                | `true`  | Enable persistent task storage.                             |
+| `fileStore`                   | `boolean`                                | `true`  | Enable persistent file artifact storage.                    |
+| `sendMessageCharacterLimit`   | `number`                                 | `50000` | Maximum characters for minimized artifact text.             |
+| `minimizedObjectStringLength` | `number`                                 | `5000`  | Maximum string length for minimized data objects.           |
+| `viewArtifactCharacterLimit`  | `number`                                 | `50000` | Maximum characters returned by view artifact tools.         |
+| `agentCardTimeout`            | `number`                                 | `15`    | Timeout in seconds for fetching remote agent cards.         |
+| `sendMessageTimeout`          | `number`                                 | `60`    | Timeout in seconds for send message requests.               |
+| `getTaskTimeout`              | `number`                                 | `60`    | Timeout in seconds for get task monitoring.                 |
+| `getTaskPollInterval`         | `number`                                 | `5`     | Interval in seconds between task status polls.              |
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `agentCard.name` | `string` | Agent identity name | Agent Card display name. |
-| `agentCard.description` | `string` | `"AI assistant powered by OpenClaw"` | Agent Card description. |
-| `agentCard.skills` | `array` | `[]` | Skills to advertise. Each needs `id`, `name`, `description`. Optional: `tags`, `examples`, `inputModes`, `outputModes`. Can also be set at runtime with `a2a_update_agent_card`. |
-| `apiKeys` | `array` | — | Array of `{ label, key }` objects for inbound auth. |
-| `allowUnauthenticated` | `boolean` | `false` | Skip API key validation for inbound requests. |
-| `gatewayTimeout` | `number` | `300` | Timeout in seconds for gateway calls to the local OpenClaw agent. |
+### Receiving Messages (inbound)
 
-### Outbound Authentication
+Other A2A agents can discover and message your OpenClaw agent through the inbound
+endpoints. Follow the steps below to make your agent reachable.
 
-When a remote agent requires an API key, configure credentials in the agent's
-`custom_headers`. Header values support `${ENV_VAR}` substitution so you can keep
-secrets out of your config file:
+#### 1. Configure Inbound
 
 ```json
 {
-  "outbound": {
-    "agents": {
-      "partner": {
-        "url": "https://partner-agent.example.com/.well-known/agent-card.json",
-        "custom_headers": {
-          "Authorization": "Bearer ${PARTNER_API_KEY}"
+    "tools": {
+        "profile": "full"
+    },
+    "plugins": {
+        "entries": {
+            "a2a": {
+                "enabled": true
+            }
         }
-      }
+    },
+    "sandbox": {
+        "tools": {
+            "alsoAllow": ["a2a_update_agent_card"]
+        }
     }
+}
+```
+
+> **Note:** The "sandbox" section is only required if sandbox is enabled.
+
+#### 2. Restart the Gateway
+
+The plugin registers its HTTP endpoints on startup, so a restart is required.
+
+#### 3. Generate an Agent Card
+
+Ask your OpenClaw to use the `a2a_update_agent_card` tool to create its Agent Card that describes it (name, description, skills, etc).
+
+#### 4. Generate an API Key
+
+Generate a separate key for each person you want to grant access. This way you
+can revoke someone's access without affecting others:
+
+```bash
+openclaw a2a generate-key alice
+openclaw a2a generate-key bob
+```
+
+#### 5. Expose Your Gateway
+
+You need to make your Gateway's HTTP port (default 18789) reachable from the
+internet. [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) is the
+recommended approach — it gives your machine a public HTTPS URL with automatic
+TLS certificates, no port forwarding or DNS configuration needed. You can also
+use any reverse proxy (nginx, Caddy, etc.).
+
+##### Install Tailscale
+
+```bash
+# Linux
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# macOS (Homebrew)
+brew install tailscale
+
+# Windows (winget)
+winget install Tailscale.Tailscale
+```
+
+Then sign in:
+
+```bash
+tailscale up
+```
+
+##### Enable Funnel Prerequisites
+
+```bash
+# Enable HTTPS certificates (also enables MagicDNS if not already on)
+tailscale cert $(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')
+
+# Enable Funnel for this node
+tailscale funnel --bg http://localhost:18789
+```
+
+If the `funnel` command fails with a policy error, you need to add the
+Funnel ACL attribute in the [admin console](https://login.tailscale.com/admin/acls/file)
+(there is no CLI equivalent for editing ACLs):
+
+```json
+"nodeAttrs": [
+  {
+    "target": ["autogroup:member"],
+    "attr": ["funnel"]
   }
+]
+```
+
+##### Start Funnel
+
+```bash
+tailscale --socket /tmp/tailscaled.sock serve funnel --bg http://localhost:18789
+```
+
+> **Note:** Use `http://localhost:18789` (not `https`). The Gateway serves plain HTTP;
+> Tailscale terminates TLS at the Funnel edge.
+
+##### Tailscale Serve (Tailnet-Only)
+
+If you only need agents on your tailnet to reach you (not the public internet),
+use Tailscale Serve instead of Funnel:
+
+```bash
+tailscale --socket /tmp/tailscaled.sock serve --bg http://localhost:18789
+```
+
+With Serve, traffic is restricted to your tailnet, so disabling authentication
+is reasonable.
+
+##### Stopping Funnel
+
+```bash
+tailscale --socket /tmp/tailscaled.sock serve funnel --https=443 off
+```
+
+#### 6. Verify
+
+Open your Agent Card URL in a browser:
+
+```
+https://your-machine.tail1234.ts.net/.well-known/agent-card.json
+```
+
+You should see a JSON response with your agent's name, description, and skills.
+
+#### 7. Share Your URL and Key
+
+Send your Agent Card URL and the generated API key to the remote agent operator.
+They configure their agent to point at your URL with the key in the
+`Authorization` header.
+
+#### Inbound Authentication
+
+When a remote agent sends a message to your `/a2a` endpoint, it must include
+your API key in the `Authorization` header:
+
+```
+Authorization: Bearer <key>
+```
+
+If no keys are configured and `allowUnauthenticated` is not set, the `/a2a`
+endpoint rejects all requests. Generate at least one key to start receiving
+messages.
+
+#### Key Management CLI
+
+```bash
+openclaw a2a generate-key <label>    # Generate and save a new key
+openclaw a2a list-keys               # List all configured keys (masked)
+openclaw a2a revoke-key <label>      # Remove a key by label
+```
+
+Restart the gateway after generating or revoking keys to apply changes.
+
+#### Inbound Configuration Reference
+
+All options live under `plugins.entries.a2a.config.inbound`:
+
+| Field                   | Type      | Default                              | Description                                                                                                                                                                      |
+| ----------------------- | --------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agentCard.name`        | `string`  | Agent identity name                  | Agent Card display name.                                                                                                                                                         |
+| `agentCard.description` | `string`  | `"AI assistant powered by OpenClaw"` | Agent Card description.                                                                                                                                                          |
+| `agentCard.skills`      | `array`   | `[]`                                 | Skills to advertise. Each needs `id`, `name`, `description`. Optional: `tags`, `examples`, `inputModes`, `outputModes`. Can also be set at runtime with `a2a_update_agent_card`. |
+| `apiKeys`               | `array`   | —                                    | Array of `{ label, key }` objects for inbound auth.                                                                                                                              |
+| `allowUnauthenticated`  | `boolean` | `false`                              | Skip API key validation for inbound requests.                                                                                                                                    |
+| `gatewayTimeout`        | `number`  | `300`                                | Timeout in seconds for gateway calls to the local OpenClaw agent.                                                                                                                |
+
+### Security
+
+- **Inbound requests require authentication by default.** If no API keys are
+  configured and `allowUnauthenticated` is not set, all inbound requests are
+  rejected.
+- API keys are 32-byte random base64url strings using **timing-safe HMAC-SHA256
+  comparison** to prevent timing attacks.
+- **Do not set `allowUnauthenticated: true`** unless your gateway is only
+  accessible on a private network (e.g. via Tailscale Serve).
+- Consider running a **dedicated OpenClaw agent** for A2A to isolate it from
+  your primary agent's tools and data. Create a sandboxed agent with restricted
+  tools:
+
+```json5
+{
+    agents: {
+        list: [
+            {
+                id: "a2a-gateway",
+                name: "A2A Gateway",
+                workspace: "~/.openclaw/workspace-a2a",
+                sandbox: { mode: "all", scope: "agent" },
+                tools: {
+                    allow: ["read", "sessions_list", "sessions_send"],
+                    deny: ["exec", "write", "edit", "apply_patch", "browser"],
+                },
+            },
+        ],
+    },
 }
 ```
 
 ## 📤 Sending Messages (outbound)
 
-Enable the plugin, configure at least one remote agent, and your OpenClaw agent
-can send messages and files to any A2A-compatible agent — no Tailscale or port exposure needed. You just need the remote agent's Agent Card URL (and API key, if required).
+The `a2a_*` tools are registered when at least one agent is configured (`agents`).
 
-### Tools
-
-#### `a2a_get_agents`
+### `a2a_get_agents`
 
 List all available remote A2A agents with names and descriptions.
 
 No parameters.
 
-#### `a2a_get_agent`
+### `a2a_get_agent`
 
 Get detailed info about a specific agent, including skills.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | Yes | The agent's unique identifier |
+| Parameter  | Type   | Required | Description                   |
+| ---------- | ------ | -------- | ----------------------------- |
+| `agent_id` | string | Yes      | The agent's unique identifier |
 
-#### `a2a_send_message`
+### `a2a_send_message`
 
 Send a message to a remote agent and receive a structured response. The message
 is sent non-blocking — the tool streams or polls for updates until the task
@@ -192,57 +371,57 @@ reaches a terminal state or the timeout is reached. If the task is still in
 progress after the timeout, the current task state is returned. Use
 `a2a_get_task` with the returned `id` to continue monitoring.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | Yes | ID of the target agent |
-| `message` | string | Yes | Message content to send |
-| `context_id` | string | No | Continue an existing multi-turn conversation |
-| `task_id` | string | No | Attach to an existing task (for `input_required` flows) |
-| `timeout` | number | No | Override default timeout in seconds |
-| `data` | array | No | Structured data to include with the message. Each item is sent as a separate JSON object or array alongside the text. |
-| `files` | array | No | Files to include with the message. Accepts local file paths (read and sent as binary, max 1MB) or URLs (sent as references for the remote agent to fetch). |
+| Parameter    | Type   | Required | Description                                                                                                                                                |
+| ------------ | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent_id`   | string | Yes      | ID of the target agent                                                                                                                                     |
+| `message`    | string | Yes      | Message content to send                                                                                                                                    |
+| `context_id` | string | No       | Continue an existing multi-turn conversation                                                                                                               |
+| `task_id`    | string | No       | Attach to an existing task (for `input_required` flows)                                                                                                    |
+| `timeout`    | number | No       | Override default timeout in seconds                                                                                                                        |
+| `data`       | array  | No       | Structured data to include with the message. Each item is sent as a separate JSON object or array alongside the text.                                      |
+| `files`      | array  | No       | Files to include with the message. Accepts local file paths (read and sent as binary, max 1MB) or URLs (sent as references for the remote agent to fetch). |
 
-#### `a2a_get_task`
+### `a2a_get_task`
 
 Check the progress of an A2A task that is still in progress. Monitors until the
 task reaches a terminal state or the timeout is reached. If still in progress,
 returns the current task state — call again to continue monitoring.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | Yes | ID of the agent owning the task |
-| `task_id` | string | Yes | Task ID from a previous `a2a_send_message` |
-| `timeout` | number | No | Monitoring timeout in seconds |
-| `poll_interval` | number | No | Interval between status checks in seconds |
+| Parameter       | Type   | Required | Description                                |
+| --------------- | ------ | -------- | ------------------------------------------ |
+| `agent_id`      | string | Yes      | ID of the agent owning the task            |
+| `task_id`       | string | Yes      | Task ID from a previous `a2a_send_message` |
+| `timeout`       | number | No       | Monitoring timeout in seconds              |
+| `poll_interval` | number | No       | Interval between status checks in seconds  |
 
-#### `a2a_view_text_artifact`
+### `a2a_view_text_artifact`
 
 View text content from an artifact, optionally selecting a line or character
 range. Can select by line range OR character range, but not both.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | Yes | ID of the agent that produced the artifact |
-| `task_id` | string | Yes | Task ID containing the artifact |
-| `artifact_id` | string | Yes | The artifact's unique identifier |
-| `line_start` | number | No | Starting line number (1-based, inclusive) |
-| `line_end` | number | No | Ending line number (1-based, inclusive) |
-| `character_start` | number | No | Starting character index (0-based, inclusive) |
-| `character_end` | number | No | Ending character index (0-based, exclusive) |
+| Parameter         | Type   | Required | Description                                   |
+| ----------------- | ------ | -------- | --------------------------------------------- |
+| `agent_id`        | string | Yes      | ID of the agent that produced the artifact    |
+| `task_id`         | string | Yes      | Task ID containing the artifact               |
+| `artifact_id`     | string | Yes      | The artifact's unique identifier              |
+| `line_start`      | number | No       | Starting line number (1-based, inclusive)     |
+| `line_end`        | number | No       | Ending line number (1-based, inclusive)       |
+| `character_start` | number | No       | Starting character index (0-based, inclusive) |
+| `character_end`   | number | No       | Ending character index (0-based, exclusive)   |
 
-#### `a2a_view_data_artifact`
+### `a2a_view_data_artifact`
 
 View structured data from an artifact with optional JSON path, row, and column
 filtering.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | Yes | ID of the agent that produced the artifact |
-| `task_id` | string | Yes | Task ID containing the artifact |
-| `artifact_id` | string | Yes | The artifact's unique identifier |
-| `json_path` | string | No | Dot-separated path to navigate data (e.g. `"results.items"`) |
-| `rows` | string | No | Row selection for list data (`"0"`, `"0-10"`, `"0,2,5"`, or `"all"`) |
-| `columns` | string | No | Column selection for tabular data (`"name"`, `"name,age"`, or `"all"`) |
+| Parameter     | Type   | Required | Description                                                            |
+| ------------- | ------ | -------- | ---------------------------------------------------------------------- |
+| `agent_id`    | string | Yes      | ID of the agent that produced the artifact                             |
+| `task_id`     | string | Yes      | Task ID containing the artifact                                        |
+| `artifact_id` | string | Yes      | The artifact's unique identifier                                       |
+| `json_path`   | string | No       | Dot-separated path to navigate data (e.g. `"results.items"`)           |
+| `rows`        | string | No       | Row selection for list data (`"0"`, `"0-10"`, `"0,2,5"`, or `"all"`)   |
+| `columns`     | string | No       | Column selection for tabular data (`"name"`, `"name,age"`, or `"all"`) |
 
 ### Examples
 
@@ -254,10 +433,10 @@ a2a_get_agents()
 
 ```json
 {
-  "tweet-search": {
-    "name": "Tweet Search",
-    "description": "Find and analyze tweets by keyword, URL, author, list, or thread. Filter by language, media type, engagement, date range, or location. Get a clean table of tweets with authors, links, media, and counts; then refine the table and generate new columns with AI."
-  }
+    "tweet-search": {
+        "name": "Tweet Search",
+        "description": "Find and analyze tweets by keyword, URL, author, list, or thread. Filter by language, media type, engagement, date range, or location. Get a clean table of tweets with authors, links, media, and counts; then refine the table and generate new columns with AI."
+    }
 }
 ```
 
@@ -441,14 +620,14 @@ a2a_send_message(agent_id: "tweet-search", message: "Find tweets about AI from t
 
 ```json
 {
-  "id": "tsk-123",
-  "contextId": "ctx-123",
-  "kind": "task",
-  "status": {
-    "state": "working",
-    "message": null
-  },
-  "artifacts": []
+    "id": "tsk-123",
+    "contextId": "ctx-123",
+    "kind": "task",
+    "status": {
+        "state": "working",
+        "message": null
+    },
+    "artifacts": []
 }
 ```
 
@@ -499,275 +678,58 @@ a2a_view_data_artifact(
 
 ## 📥 Receiving Messages (inbound)
 
-Other A2A agents can discover and message your OpenClaw agent through the inbound
-endpoints. Follow this checklist to make your agent reachable.
-
-### Tools
-
 The `a2a_update_agent_card` tool is registered when inbound is configured
 (`apiKeys` or `allowUnauthenticated`).
 
-#### `a2a_update_agent_card`
+### `a2a_update_agent_card`
 
 Live-update this agent's A2A Agent Card name, description, or skills. Changes
 take effect immediately and persist to config — no restart needed. At least one
 field must be provided.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `name` | string | No | Display name for the Agent Card |
-| `description` | string | No | Description for the Agent Card |
-| `skills` | array | No | Skills to advertise (objects with `id`, `name`, `description`, and optional `tags`/`examples`) |
-
-### 1. Enable the Plugin
-
-Add to your OpenClaw config:
-
-```json5
-{
-  plugins: {
-    entries: {
-      a2a: {
-        enabled: true,
-      },
-    },
-  },
-}
-```
-
-### 2. Restart the Gateway
-
-The plugin registers its HTTP endpoints on startup, so a restart is required.
-
-### 3. Generate an API Key
-
-Generate a separate key for each person you want to grant access. This way you
-can revoke someone's access without affecting others:
-
-```bash
-openclaw a2a generate-key alice
-openclaw a2a generate-key bob
-```
-
-Each command prints the key — share it securely with the recipient.
-
-### 4. Expose Your Gateway
-
-You need to make your Gateway's HTTP port (default 18789) reachable from the
-internet. [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) is the
-recommended approach — it gives your machine a public HTTPS URL with automatic
-TLS certificates, no port forwarding or DNS configuration needed. You can also
-use any reverse proxy (nginx, Caddy, etc.).
-
-#### Install Tailscale
-
-**Option A — App (macOS / Windows):**
-
-Download from [tailscale.com/download](https://tailscale.com/download) (or the
-Mac App Store on macOS). Open the app and sign in.
-
-**Option B — Terminal (Linux / macOS / Windows):**
-
-```bash
-# Linux
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# macOS (Homebrew)
-brew install tailscale
-
-# Windows (winget)
-winget install Tailscale.Tailscale
-```
-
-Then sign in:
-
-```bash
-tailscale up
-```
-
-#### Enable Funnel Prerequisites
-
-These one-time steps can be done via the admin console or the CLI.
-
-**Option A — Admin console:**
-
-In the [Tailscale admin console](https://login.tailscale.com/admin):
-
-1. **MagicDNS** — enable under [DNS settings](https://login.tailscale.com/admin/dns)
-2. **HTTPS Certificates** — enable on the same page, below MagicDNS
-3. **Funnel ACL attribute** — under [Access Controls](https://login.tailscale.com/admin/acls/file), add:
-
-```json
-"nodeAttrs": [
-  {
-    "target": ["autogroup:member"],
-    "attr": ["funnel"]
-  }
-]
-```
-
-**Option B — Terminal:**
-
-```bash
-# Enable HTTPS certificates (also enables MagicDNS if not already on)
-tailscale cert $(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')
-
-# Enable Funnel for this node
-tailscale funnel --bg http://localhost:18789
-```
-
-If the `funnel` command fails with a policy error, you still need to add the
-Funnel ACL attribute in the [admin console](https://login.tailscale.com/admin/acls/file)
-(there is no CLI equivalent for editing ACLs):
-
-```json
-"nodeAttrs": [
-  {
-    "target": ["autogroup:member"],
-    "attr": ["funnel"]
-  }
-]
-```
-
-#### Start Funnel
-
-```bash
-tailscale funnel --bg http://localhost:18789
-```
-
-> **Note:** Use `http://localhost:18789` (not `https`). The Gateway serves plain HTTP;
-> Tailscale terminates TLS at the Funnel edge.
-
-#### Tailscale Serve (Tailnet-Only)
-
-If you only need agents on your tailnet to reach you (not the public internet),
-use Tailscale Serve instead of Funnel:
-
-```bash
-tailscale serve --bg http://localhost:18789
-```
-
-With Serve, traffic is restricted to your tailnet, so disabling authentication
-is reasonable.
-
-#### Stopping Funnel
-
-```bash
-tailscale funnel --https=443 off
-```
-
-> **Note:** If you installed Tailscale via Homebrew on macOS (instead of the native app),
-> you may need to pass `--socket` flags to commands. See the
-> [Tailscale CLI docs](https://tailscale.com/kb/1080/cli) for details.
-
-### 5. Verify
-
-Open your Agent Card URL in a browser:
-
-```
-https://your-machine.tail1234.ts.net/.well-known/agent-card.json
-```
-
-You should see a JSON response with your agent's name, description, and skills.
-
-### 6. Share Your URL and Key
-
-Send your Agent Card URL and the generated API key to the remote agent operator.
-They configure their agent to point at your URL with the key in the
-`Authorization` header.
-
-### How Inbound Auth Works
-
-When a remote agent sends a message to your `/a2a` endpoint, it must include
-your API key in the `Authorization` header:
-
-```
-Authorization: Bearer <key>
-```
-
-If no keys are configured and `allowUnauthenticated` is not set, the `/a2a`
-endpoint rejects all requests. Generate at least one key to start receiving
-messages.
-
-### Key Management CLI
-
-```bash
-openclaw a2a generate-key <label>    # Generate and save a new key
-openclaw a2a list-keys               # List all configured keys (masked)
-openclaw a2a revoke-key <label>      # Remove a key by label
-```
-
-Restart the gateway after generating or revoking keys to apply changes.
-
-## 🔒 Security
-
-- **Inbound requests require authentication by default.** If no API keys are
-  configured and `allowUnauthenticated` is not set, all inbound requests are
-  rejected.
-- API keys are 32-byte random base64url strings using **timing-safe HMAC-SHA256
-  comparison** to prevent timing attacks.
-- **Do not set `allowUnauthenticated: true`** unless your gateway is only
-  accessible on a private network (e.g. via Tailscale Serve).
-- Consider running a **dedicated OpenClaw agent** for A2A to isolate it from
-  your primary agent's tools and data. Create a sandboxed agent with restricted
-  tools:
-
-```json5
-{
-  agents: {
-    list: [
-      {
-        id: "a2a-gateway",
-        name: "A2A Gateway",
-        workspace: "~/.openclaw/workspace-a2a",
-        sandbox: { mode: "all", scope: "agent" },
-        tools: {
-          allow: ["read", "sessions_list", "sessions_send"],
-          deny: ["exec", "write", "edit", "apply_patch", "browser"],
-        },
-      },
-    ],
-  },
-}
-```
+| Parameter     | Type   | Required | Description                                                                                    |
+| ------------- | ------ | -------- | ---------------------------------------------------------------------------------------------- |
+| `name`        | string | No       | Display name for the Agent Card                                                                |
+| `description` | string | No       | Description for the Agent Card                                                                 |
+| `skills`      | array  | No       | Skills to advertise (objects with `id`, `name`, `description`, and optional `tags`/`examples`) |
 
 ## 🌐 HTTP Endpoints
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/.well-known/agent-card.json` | GET | No | Returns the Agent Card for discovery |
-| `/a2a` | POST | Bearer token | JSON-RPC 2.0 endpoint supporting `message/send`, `message/stream`, `tasks/get`, `tasks/cancel` |
+| Endpoint                       | Method | Auth         | Description                                                                                    |
+| ------------------------------ | ------ | ------------ | ---------------------------------------------------------------------------------------------- |
+| `/.well-known/agent-card.json` | GET    | No           | Returns the Agent Card for discovery                                                           |
+| `/a2a`                         | POST   | Bearer token | JSON-RPC 2.0 endpoint supporting `message/send`, `message/stream`, `tasks/get`, `tasks/cancel` |
 
 ### Supported JSON-RPC Methods
 
-| Method | Description |
-|--------|-------------|
-| `message/send` | Send a message and wait for the full response |
+| Method           | Description                                            |
+| ---------------- | ------------------------------------------------------ |
+| `message/send`   | Send a message and wait for the full response          |
 | `message/stream` | Send a message with Server-Sent Events (SSE) streaming |
-| `tasks/get` | Get the status and details of a task |
-| `tasks/cancel` | Cancel an ongoing task |
+| `tasks/get`      | Get the status and details of a task                   |
+| `tasks/cancel`   | Cancel an ongoing task                                 |
 
 ### Error Codes
 
-| Code | Meaning |
-|------|---------|
-| `-32700` | Parse error |
-| `-32600` | Invalid request |
-| `-32601` | Method not found |
-| `-32602` | Invalid params |
+| Code     | Meaning                 |
+| -------- | ----------------------- |
+| `-32700` | Parse error             |
+| `-32600` | Invalid request         |
+| `-32601` | Method not found        |
+| `-32602` | Invalid params          |
 | `-32001` | Authentication required |
-| `-32000` | Server error |
+| `-32000` | Server error            |
 
 ## 💾 Data Storage
 
-Tasks and file artifacts are saved locally within OpenClaw's state directory, separated by direction:
+Tasks and file artifacts are saved locally within OpenClaw's workspace directory, separated by direction:
 
-| Direction | Type | Path |
-|-----------|------|------|
-| Outbound | Tasks | `<stateDir>/a2a/outbound/tasks/` |
-| Outbound | Files | `<stateDir>/a2a/outbound/files/` |
-| Inbound | Tasks | `<stateDir>/a2a/inbound/tasks/` |
-| Inbound | Files | `<stateDir>/a2a/inbound/files/` |
+| Direction | Type  | Path                              |
+| --------- | ----- | --------------------------------- |
+| Outbound  | Tasks | `<workspace>/a2a/outbound/tasks/` |
+| Outbound  | Files | `<workspace>/a2a/outbound/files/` |
+| Inbound   | Tasks | `<workspace>/a2a/inbound/tasks/`  |
+| Inbound   | Files | `<workspace>/a2a/inbound/files/`  |
 
 Outbound task/file storage can be disabled with `outbound.taskStore: false` and `outbound.fileStore: false`.
 
@@ -780,13 +742,6 @@ make ci                  # Lint, typecheck, and test with coverage
 make fix                 # Auto-fix formatting and lint issues
 bun run build            # Compile to dist/
 ```
-
-The local git hooks mirror the shared project template workflow:
-
-- `.githooks/pre-commit` runs `make fix` and re-stages tracked changes
-- `.githooks/pre-push` runs `make ci`
-
-They are optional but recommended for contributors working on this repo locally.
 
 ## 📄 License
 
