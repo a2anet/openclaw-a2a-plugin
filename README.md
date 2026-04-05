@@ -54,7 +54,7 @@ Then restart the gateway:
 openclaw gateway restart
 ```
 
-Follow the instructions in "📤 Sending Messages (outbound)" and/or "📥 Receiving Messages (inbound)"
+Follow the set up instructions in "📤 Sending Messages (outbound)" and/or "📥 Receiving Messages (inbound)".
 
 ## 📤 Sending Messages (outbound)
 
@@ -126,6 +126,7 @@ exposure needed.
 ### Tools
 
 The `a2a_*` tools are registered when at least one agent is configured (`agents`).
+The plugin is powered by [A2A Utils](https://github.com/a2anet/a2a-utils), for example tool usage, results, etc. see [A2A Utils JavaScript A2ATools](https://github.com/a2anet/a2a-utils/blob/main/javascript/README.md#a2atools).
 
 #### `a2a_get_agents`
 
@@ -200,259 +201,6 @@ filtering.
 | `json_path`   | string | No       | Dot-separated path to navigate data (e.g. `"results.items"`)           |
 | `rows`        | string | No       | Row selection for list data (`"0"`, `"0-10"`, `"0,2,5"`, or `"all"`)   |
 | `columns`     | string | No       | Column selection for tabular data (`"name"`, `"name,age"`, or `"all"`) |
-
-### Examples
-
-#### List agents
-
-```
-a2a_get_agents()
-```
-
-```json
-{
-    "tweet-search": {
-        "name": "Tweet Search",
-        "description": "Find and analyze tweets by keyword, URL, author, list, or thread. Filter by language, media type, engagement, date range, or location. Get a clean table of tweets with authors, links, media, and counts; then refine the table and generate new columns with AI."
-    }
-}
-```
-
-#### Get agent details
-
-```
-a2a_get_agent(agent_id: "tweet-search")
-```
-
-```json
-{
-  "name": "Tweet Search",
-  "description": "Find and analyze tweets by keyword, URL, author, list, or thread. Filter by language, media type, engagement, date range, or location. Get a clean table of tweets with authors, links, media, and counts; then refine the table and generate new columns with AI.",
-  "skills": [
-    {
-      "name": "Search Tweets",
-      "description": "Search X by keywords, URLs, handles, or conversation IDs. Filter by engagement (retweets/favorites/replies), dates, language, location, media type (images/videos/quotes), user verification status, and author/reply/mention relationships. Sort by Top or Latest. Return 1-10,000 results."
-    },
-    ...,
-    {
-      "name": "Generate Table",
-      "description": "Generate a new table from any table with AI. Explain what table you want to generate from, what columns you want to keep, and what new columns you want to generate."
-    }
-  ]
-}
-```
-
-#### Send a message
-
-```
-a2a_send_message(agent_id: "tweet-search", message: "Find tweets about AI from today (January 12, 2026)")
-```
-
-```json
-{
-  "id": "tsk-123",
-  "contextId": "ctx-123",
-  "kind": "task",
-  "status": {
-    "state": "completed",
-    "message": {
-      "contextId": "ctx-123",
-      "kind": "message",
-      "parts": [
-        {
-          "kind": "text",
-          "text": "I found 10 tweets about \"AI\" posted on January 12, 2026. The search parameters used were:\n\n- Search Terms: AI\n- Start Date: 2026-01-12\n- End Date: 2026-01-13\n- Maximum Items: 10\n\nWould you like to see more tweets, or do you want a summary or analysis of these results?"
-        }
-      ]
-    }
-  },
-  "artifacts": [
-    {
-      "artifactId": "art-123",
-      "description": "Tweets about AI posted on January 12, 2026.",
-      "name": "AI Tweets from January 12, 2026",
-      "parts": [
-        {
-          "kind": "data",
-          "data": {
-            "records": {
-              "_total_rows": 10,
-              "_columns": [
-                {
-                  "count": 1,
-                  "unique_count": 1,
-                  "types": [
-                    {
-                      "name": "int",
-                      "count": 1,
-                      "percentage": 100.0,
-                      "sample_value": 213,
-                      "minimum": 213,
-                      "maximum": 213,
-                      "average": 213
-                    }
-                  ],
-                  "name": "quote.author.mediaCount"
-                },
-                ...,
-                {
-                  "count": 10,
-                  "unique_count": 1,
-                  "types": [
-                    {
-                      "name": "bool",
-                      "count": 10,
-                      "percentage": 100.0,
-                      "sample_value": false
-                    }
-                  ],
-                  "name": "isPinned"
-                }
-              ]
-            },
-            "_tip": "Data was minimized. Call view_data_artifact() to navigate to specific data."
-          }
-        }
-      ]
-    }
-  ]
-}
-```
-
-#### Send a message with data and files
-
-```
-a2a_send_message(
-  agent_id: "analyst",
-  message: "Analyze this sales data and the attached report",
-  data: [{"quarter": "Q1", "revenue": 1500000}],
-  files: ["/path/to/report.pdf", "https://example.com/data.csv"]
-)
-```
-
-#### Multi-turn conversation
-
-Use `contextId` from a previous response to continue the conversation:
-
-```
-a2a_send_message(
-  agent_id: "tweet-search",
-  message: "Can you summarize each of the 10 tweets in the table in 3-5 words each? Just give me a simple list with the author name and summary.",
-  context_id: "ctx-123"
-)
-```
-
-```json
-{
-  "id": "tsk-456",
-  "contextId": "ctx-123",
-  "kind": "task",
-  "status": {
-    "state": "completed",
-    "message": {
-      "contextId": "ctx-123",
-      "kind": "message",
-      "parts": [
-        {
-          "kind": "text",
-          "text": "Here is a simple list of each tweet's author and a 3-5 word summary:\n\n1. alienofeth – Real-time STT intent detection\n2. UnderdogEth_ – AI ownership discussion thread\n3. Count_Down_000 – Learning new vocabulary word\n4. ThaJonseBoy – AI and market predictions\n5. Evelyn852422353 – AI model comparison debate\n6. SyrilTchouta – Language learning with AI\n7. cx. – AI in marketing insights\n8. Halosznn_ – Graphic design course shared\n9. xmaquina – AI smarter models discussion\n10. Flagm8_ – AI and business strategy\n\nLet me know if you want more details or a different format!"
-        }
-      ]
-    }
-  },
-  "artifacts": [
-    {
-      "artifactId": "art-456",
-      "description": "A simple list of each tweet's author and a 3-5 word summary of the tweet content.",
-      "name": "AI Tweet Summaries 3-5 Words",
-      "parts": [
-        {
-          "kind": "data",
-          "data": {
-            "records": [
-              {
-                "author.userName": "ai_q2_",
-                "summary": "Possibly understand"
-              },
-              ...,
-              {
-                "author.userName": "CallStackTech",
-                "summary": "Real-time STT intent detection"
-              }
-            ]
-          }
-        }
-      ]
-    }
-  ]
-}
-```
-
-#### Handle a long-running task
-
-If the remote agent takes longer than the `timeout` (default: 60 seconds), `a2a_send_message` returns the task in its current state:
-
-```
-a2a_send_message(agent_id: "tweet-search", message: "Find tweets about AI from today (January 12, 2026)")
-```
-
-```json
-{
-    "id": "tsk-123",
-    "contextId": "ctx-123",
-    "kind": "task",
-    "status": {
-        "state": "working",
-        "message": null
-    },
-    "artifacts": []
-}
-```
-
-Use `a2a_get_task` to check progress:
-
-```
-a2a_get_task(agent_id: "tweet-search", task_id: "tsk-123")
-```
-
-When complete, the response matches the format shown in [Send a message](#send-a-message). If still working, call `a2a_get_task` again to continue monitoring.
-
-#### View data artifact
-
-```
-a2a_view_data_artifact(
-  agent_id: "tweet-search",
-  task_id: "tsk-123",
-  artifact_id: "art-123",
-  json_path: "records",
-  rows: "all",
-  columns: "author.userName,text"
-)
-```
-
-```json
-{
-  "artifactId": "art-123",
-  "description": "Tweets about AI posted on January 12, 2026.",
-  "name": "AI Tweets from January 12, 2026",
-  "parts": [
-    {
-      "kind": "data",
-      "data": [
-        {
-          "author.userName": "ai_q2_",
-          "text": "@nyank_x わかるかもしれない"
-        },
-        ...,
-        {
-          "author.userName": "CallStackTech",
-          "text": "Just built a real-time STT pipeline that detects intent faster than you can say \"Hello!\" 🎤✨ Discover how I used Deepgram to achieve su...\n\n🔗 https://t.co/dgbvdlATZ0\n\n#VoiceAI #AI #BuildInPublic"
-        }
-      ]
-    }
-  ]
-}
-```
 
 ## 📥 Receiving Messages (inbound)
 
@@ -575,9 +323,6 @@ Funnel ACL attribute in the [admin console](https://login.tailscale.com/admin/ac
 tailscale serve funnel --bg http://localhost:18789
 ```
 
-> **Note:** Use `http://localhost:18789` (not `https`). The Gateway serves plain HTTP;
-> Tailscale terminates TLS at the Funnel edge.
-
 ##### Tailscale Serve (Tailnet-Only)
 
 If you only need agents on your tailnet to reach you (not the public internet),
@@ -629,6 +374,8 @@ They'll need to install the plugin and add your OpenClaw as a remote agent with 
     "Authorization": "Bearer [GENERATED API KEY]"
 }
 ```
+
+That's it! Your friend's agent should now be able to send messages and files to your OpenClaw.
 
 ### Tools
 
