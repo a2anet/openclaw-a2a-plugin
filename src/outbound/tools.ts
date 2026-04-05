@@ -10,6 +10,7 @@ import {
     JSONTaskStore,
     LocalFileStore,
 } from "@a2anet/a2a-utils";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 import type { A2AAgentEntry } from "../config.js";
 import { type AgentTool, jsonResult } from "../types.js";
@@ -66,12 +67,15 @@ export function createOutboundTools(params: CreateOutboundToolsParams): AgentToo
 
     const tools = new A2ATools(session, { artifactSettings });
 
-    return tools.toolDefinitions.map((def) => ({
-        name: `a2a_${def.name}`,
-        label: `a2a_${def.name}`,
-        description: def.description,
-        parameters: def.schema,
-        execute: async (_toolCallId: string, params: Record<string, unknown>) =>
-            jsonResult(await def.execute(params)),
-    }));
+    return tools.toolDefinitions.map((def) => {
+        const { $schema: _, ...jsonSchema } = zodToJsonSchema(def.schema, { target: "openAi" });
+        return {
+            name: `a2a_${def.name}`,
+            label: `a2a_${def.name}`,
+            description: def.description,
+            parameters: jsonSchema,
+            execute: async (_toolCallId: string, params: Record<string, unknown>) =>
+                jsonResult(await def.execute(params)),
+        };
+    });
 }

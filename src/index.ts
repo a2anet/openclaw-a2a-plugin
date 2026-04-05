@@ -223,7 +223,7 @@ const a2aPlugin = definePluginEntry({
         function resolvePublicUrl(req: import("node:http").IncomingMessage): string {
             const host = req.headers.host || "localhost";
             const rawProto = req.headers["x-forwarded-proto"];
-            const protocol = typeof rawProto === "string" ? rawProto.split(",")[0].trim() : "https";
+            const protocol = typeof rawProto === "string" ? rawProto.split(",")[0].trim() : (req.socket as import("node:tls").TLSSocket).encrypted ? "https" : "http";
             return `${protocol}://${host}`;
         }
 
