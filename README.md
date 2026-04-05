@@ -6,19 +6,12 @@
 Send messages and files to other agents over the internet, and/or allow your agent to receive messages and files with Tailscale.
 The plugin is powered by [A2A Utils](https://github.com/a2anet/a2a-utils), a comprehensive set of utility functions for using [A2A servers (remote agents)](https://a2a-protocol.org/latest/topics/key-concepts/#core-actors-in-a2a-interactions), that powers the [A2A MCP Server](https://github.com/a2anet/a2a-mcp).
 
-> [!WARNING]
-> Making your agent publicly accessible means other agents can send it messages.
-> A malicious agent could attempt to convince your agent to take unwanted actions on your computer, like running commands, reading files, etc.
-> The plugin requires an API key by default.
-> Only share keys with people you trust, and consider using a
-> [dedicated gateway agent](#-security) with restricted tools for extra safety.
-
 ## 💡 Use Cases
 
 - Connect a sandboxed local OpenClaw to a full access OpenClaw in the cloud to efficiently share context and files
 - Connect your OpenClaw with a classmate's or co-worker's to work together on a project
 - Connect your OpenClaw with a company-wide OpenClaw to ask questions, give updates, and access company accounts and services
-- Connect your OpenClaw to agents on A2A directories, marketplaces, etc. to ehance OpenClaw's capabilities
+- Connect your OpenClaw to agents on A2A marketplaces to ehance OpenClaw's capabilities
 - Connect your OpenClaw with a friend's to plan a fun day out based on what it knows about you
 - Connect your OpenClaw with a co-worker's to schedule a meeting and share all required information, documents, etc. up front
 
@@ -38,8 +31,7 @@ The plugin is powered by [A2A Utils](https://github.com/a2anet/a2a-utils), a com
 
 ## 🤖 A2A Core Concepts
 
-The [A2A protocol](https://a2a-project.org/) is a protocol for agent-to-agent communication.
-It is supported by AWS, Azure, and GCP; and 150+ enterprises.
+The [A2A protocol](https://a2a-project.org/) is a protocol for agent-to-agent communication supported by AWS, Azure, GCP, and [150+ enterprises](https://a2a-protocol.org/latest/partners/).
 
 - **Agent Card** — A JSON object at a publicly available URL (e.g. `/.well-known/agent-card.json`) that describes an agent (name, description, skills, etc).
 - **Message** — a single communication turn between agents, containing one or
@@ -56,18 +48,17 @@ To install the plugin:
 openclaw plugins install @a2anet/openclaw-a2a-plugin
 ```
 
-Or clone into your extensions directory:
+Then restart the gateway:
 
 ```bash
-git clone https://github.com/a2anet/openclaw-a2a-plugin.git ~/.openclaw/extensions/a2a
-cd ~/.openclaw/extensions/a2a && npm install
+openclaw gateway restart
 ```
 
-Then restart the gateway.
+Follow the instructions in "📤 Sending Messages (outbound)" and/or "📥 Receiving Messages (inbound)"
 
-## ⚙️ Set Up
+## 📤 Sending Messages (outbound)
 
-### Sending Messages (outbound)
+### Set Up
 
 Configure at least one remote agent in your OpenClaw config. You just need the
 remote agent's Agent Card URL (and API key, if required). No Tailscale or port
@@ -115,14 +106,9 @@ exposure needed.
 }
 ```
 
-> **Note:** The "sandbox" section is only required if sandbox is enabled.
-
-Header values support `${ENV_VAR}` substitution so you can keep secrets out of
-your config file.
-
-#### Outbound Configuration Reference
-
-All options live under `plugins.entries.a2a.config.outbound`:
+> **Note:** Header values support `${ENV_VAR}` substitution so you can keep secrets out of
+> your config file.
+> The "sandbox" section is only required if sandbox is enabled.
 
 | Field                         | Type                                     | Default | Description                                                 |
 | ----------------------------- | ---------------------------------------- | ------- | ----------------------------------------------------------- |
@@ -137,225 +123,17 @@ All options live under `plugins.entries.a2a.config.outbound`:
 | `getTaskTimeout`              | `number`                                 | `60`    | Timeout in seconds for get task monitoring.                 |
 | `getTaskPollInterval`         | `number`                                 | `5`     | Interval in seconds between task status polls.              |
 
-### Receiving Messages (inbound)
-
-Other A2A agents can discover and message your OpenClaw agent through the inbound
-endpoints. Follow the steps below to make your agent reachable.
-
-#### 1. Configure Inbound
-
-```json
-{
-    "tools": {
-        "profile": "full"
-    },
-    "plugins": {
-        "entries": {
-            "a2a": {
-                "enabled": true
-            }
-        }
-    },
-    "sandbox": {
-        "tools": {
-            "alsoAllow": ["a2a_update_agent_card"]
-        }
-    }
-}
-```
-
-> **Note:** The "sandbox" section is only required if sandbox is enabled.
-
-#### 2. Restart the Gateway
-
-The plugin registers its HTTP endpoints on startup, so a restart is required.
-
-#### 3. Generate an Agent Card
-
-Ask your OpenClaw to use the `a2a_update_agent_card` tool to create its Agent Card that describes it (name, description, skills, etc).
-
-#### 4. Generate an API Key
-
-Generate a separate key for each person you want to grant access. This way you
-can revoke someone's access without affecting others:
-
-```bash
-openclaw a2a generate-key alice
-openclaw a2a generate-key bob
-```
-
-#### 5. Expose Your Gateway
-
-You need to make your Gateway's HTTP port (default 18789) reachable from the
-internet. [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) is the
-recommended approach — it gives your machine a public HTTPS URL with automatic
-TLS certificates, no port forwarding or DNS configuration needed. You can also
-use any reverse proxy (nginx, Caddy, etc.).
-
-##### Install Tailscale
-
-```bash
-# Linux
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# macOS (Homebrew)
-brew install tailscale
-
-# Windows (winget)
-winget install Tailscale.Tailscale
-```
-
-Then sign in:
-
-```bash
-tailscale up
-```
-
-##### Enable Funnel Prerequisites
-
-```bash
-# Enable HTTPS certificates (also enables MagicDNS if not already on)
-tailscale cert $(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')
-
-# Enable Funnel for this node
-tailscale funnel --bg http://localhost:18789
-```
-
-If the `funnel` command fails with a policy error, you need to add the
-Funnel ACL attribute in the [admin console](https://login.tailscale.com/admin/acls/file)
-(there is no CLI equivalent for editing ACLs):
-
-```json
-"nodeAttrs": [
-  {
-    "target": ["autogroup:member"],
-    "attr": ["funnel"]
-  }
-]
-```
-
-##### Start Funnel
-
-```bash
-tailscale --socket /tmp/tailscaled.sock serve funnel --bg http://localhost:18789
-```
-
-> **Note:** Use `http://localhost:18789` (not `https`). The Gateway serves plain HTTP;
-> Tailscale terminates TLS at the Funnel edge.
-
-##### Tailscale Serve (Tailnet-Only)
-
-If you only need agents on your tailnet to reach you (not the public internet),
-use Tailscale Serve instead of Funnel:
-
-```bash
-tailscale --socket /tmp/tailscaled.sock serve --bg http://localhost:18789
-```
-
-With Serve, traffic is restricted to your tailnet, so disabling authentication
-is reasonable.
-
-##### Stopping Funnel
-
-```bash
-tailscale --socket /tmp/tailscaled.sock serve funnel --https=443 off
-```
-
-#### 6. Verify
-
-Open your Agent Card URL in a browser:
-
-```
-https://your-machine.tail1234.ts.net/.well-known/agent-card.json
-```
-
-You should see a JSON response with your agent's name, description, and skills.
-
-#### 7. Share Your URL and Key
-
-Send your Agent Card URL and the generated API key to the remote agent operator.
-They configure their agent to point at your URL with the key in the
-`Authorization` header.
-
-#### Inbound Authentication
-
-When a remote agent sends a message to your `/a2a` endpoint, it must include
-your API key in the `Authorization` header:
-
-```
-Authorization: Bearer <key>
-```
-
-If no keys are configured and `allowUnauthenticated` is not set, the `/a2a`
-endpoint rejects all requests. Generate at least one key to start receiving
-messages.
-
-#### Key Management CLI
-
-```bash
-openclaw a2a generate-key <label>    # Generate and save a new key
-openclaw a2a list-keys               # List all configured keys (masked)
-openclaw a2a revoke-key <label>      # Remove a key by label
-```
-
-Restart the gateway after generating or revoking keys to apply changes.
-
-#### Inbound Configuration Reference
-
-All options live under `plugins.entries.a2a.config.inbound`:
-
-| Field                   | Type      | Default                              | Description                                                                                                                                                                      |
-| ----------------------- | --------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agentCard.name`        | `string`  | Agent identity name                  | Agent Card display name.                                                                                                                                                         |
-| `agentCard.description` | `string`  | `"AI assistant powered by OpenClaw"` | Agent Card description.                                                                                                                                                          |
-| `agentCard.skills`      | `array`   | `[]`                                 | Skills to advertise. Each needs `id`, `name`, `description`. Optional: `tags`, `examples`, `inputModes`, `outputModes`. Can also be set at runtime with `a2a_update_agent_card`. |
-| `apiKeys`               | `array`   | —                                    | Array of `{ label, key }` objects for inbound auth.                                                                                                                              |
-| `allowUnauthenticated`  | `boolean` | `false`                              | Skip API key validation for inbound requests.                                                                                                                                    |
-| `gatewayTimeout`        | `number`  | `300`                                | Timeout in seconds for gateway calls to the local OpenClaw agent.                                                                                                                |
-
-### Security
-
-- **Inbound requests require authentication by default.** If no API keys are
-  configured and `allowUnauthenticated` is not set, all inbound requests are
-  rejected.
-- API keys are 32-byte random base64url strings using **timing-safe HMAC-SHA256
-  comparison** to prevent timing attacks.
-- **Do not set `allowUnauthenticated: true`** unless your gateway is only
-  accessible on a private network (e.g. via Tailscale Serve).
-- Consider running a **dedicated OpenClaw agent** for A2A to isolate it from
-  your primary agent's tools and data. Create a sandboxed agent with restricted
-  tools:
-
-```json5
-{
-    agents: {
-        list: [
-            {
-                id: "a2a-gateway",
-                name: "A2A Gateway",
-                workspace: "~/.openclaw/workspace-a2a",
-                sandbox: { mode: "all", scope: "agent" },
-                tools: {
-                    allow: ["read", "sessions_list", "sessions_send"],
-                    deny: ["exec", "write", "edit", "apply_patch", "browser"],
-                },
-            },
-        ],
-    },
-}
-```
-
-## 📤 Sending Messages (outbound)
+### Tools
 
 The `a2a_*` tools are registered when at least one agent is configured (`agents`).
 
-### `a2a_get_agents`
+#### `a2a_get_agents`
 
 List all available remote A2A agents with names and descriptions.
 
 No parameters.
 
-### `a2a_get_agent`
+#### `a2a_get_agent`
 
 Get detailed info about a specific agent, including skills.
 
@@ -363,7 +141,7 @@ Get detailed info about a specific agent, including skills.
 | ---------- | ------ | -------- | ----------------------------- |
 | `agent_id` | string | Yes      | The agent's unique identifier |
 
-### `a2a_send_message`
+#### `a2a_send_message`
 
 Send a message to a remote agent and receive a structured response. The message
 is sent non-blocking — the tool streams or polls for updates until the task
@@ -381,7 +159,7 @@ progress after the timeout, the current task state is returned. Use
 | `data`       | array  | No       | Structured data to include with the message. Each item is sent as a separate JSON object or array alongside the text.                                      |
 | `files`      | array  | No       | Files to include with the message. Accepts local file paths (read and sent as binary, max 1MB) or URLs (sent as references for the remote agent to fetch). |
 
-### `a2a_get_task`
+#### `a2a_get_task`
 
 Check the progress of an A2A task that is still in progress. Monitors until the
 task reaches a terminal state or the timeout is reached. If still in progress,
@@ -394,7 +172,7 @@ returns the current task state — call again to continue monitoring.
 | `timeout`       | number | No       | Monitoring timeout in seconds              |
 | `poll_interval` | number | No       | Interval between status checks in seconds  |
 
-### `a2a_view_text_artifact`
+#### `a2a_view_text_artifact`
 
 View text content from an artifact, optionally selecting a line or character
 range. Can select by line range OR character range, but not both.
@@ -409,7 +187,7 @@ range. Can select by line range OR character range, but not both.
 | `character_start` | number | No       | Starting character index (0-based, inclusive) |
 | `character_end`   | number | No       | Ending character index (0-based, exclusive)   |
 
-### `a2a_view_data_artifact`
+#### `a2a_view_data_artifact`
 
 View structured data from an artifact with optional JSON path, row, and column
 filtering.
@@ -678,10 +456,186 @@ a2a_view_data_artifact(
 
 ## 📥 Receiving Messages (inbound)
 
+> [!WARNING]
+> Making your agent publicly accessible means other agents can send it messages.
+> A malicious agent could attempt to convince your agent to take unwanted actions on your computer, like running commands, reading files, etc.
+> The plugin requires an API key for inbound requests by default.
+> Only share keys with people you trust, and consider setting up a separate profile with restricted tools for extra safety.
+
+### Set Up
+
+Other agents can discover and message your OpenClaw agent through the inbound
+endpoint. Follow the steps below to make your agent reachable.
+
+#### 1. Configure Inbound
+
+```json
+{
+    "tools": {
+        "profile": "full"
+    },
+    "plugins": {
+        "entries": {
+            "a2a": {
+                "enabled": true
+            }
+        }
+    },
+    "sandbox": {
+        "tools": {
+            "alsoAllow": ["a2a_update_agent_card"]
+        }
+    }
+}
+```
+
+> **Note:** The "sandbox" section is only required if sandbox is enabled.
+
+| Field                   | Type      | Default                              | Description                                                                                                                                                                      |
+| ----------------------- | --------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agentCard.name`        | `string`  | Agent identity name                  | Agent Card display name.                                                                                                                                                         |
+| `agentCard.description` | `string`  | `"AI assistant powered by OpenClaw"` | Agent Card description.                                                                                                                                                          |
+| `agentCard.skills`      | `array`   | `[]`                                 | Skills to advertise. Each needs `id`, `name`, `description`. Optional: `tags`, `examples`, `inputModes`, `outputModes`. Can also be set at runtime with `a2a_update_agent_card`. |
+| `apiKeys`               | `array`   | —                                    | Array of `{ label, key }` objects for inbound auth.                                                                                                                              |
+| `allowUnauthenticated`  | `boolean` | `false`                              | Skip API key validation for inbound requests.                                                                                                                                    |
+| `gatewayTimeout`        | `number`  | `300`                                | Timeout in seconds for gateway calls to the local OpenClaw agent.                                                                                                                |
+
+#### 2. Restart the Gateway
+
+The plugin registers its HTTP endpoints on startup, so a restart is required:
+
+```bash
+openclaw gateway restart
+```
+
+#### 3. Expose Your Gateway
+
+You need to make your gateway's HTTP port (default 18789) reachable from the
+internet. [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) is the
+recommended approach — it gives your machine a public HTTPS URL with automatic
+TLS certificates, no port forwarding or DNS configuration needed. You can also
+use any reverse proxy (nginx, Caddy, etc.).
+
+##### Install Tailscale
+
+Linux:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+```
+
+MacOS:
+
+```bash
+brew install tailscale
+```
+
+Windows:
+
+```bash
+winget install Tailscale.Tailscale
+```
+
+##### Sign In to Tailscale
+
+```bash
+tailscale up
+```
+
+##### Enable Funnel Prerequisites
+
+Enable HTTPS certificates (also enables MagicDNS if not already on):
+
+```bash
+tailscale cert $(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')
+```
+
+Enable funnel for the gateway:
+
+```bash
+tailscale funnel --bg http://localhost:18789
+```
+
+If the `funnel` command fails with a policy error, you need to add the
+Funnel ACL attribute in the [admin console](https://login.tailscale.com/admin/acls/file)
+(there is no CLI equivalent for editing ACLs):
+
+```json
+"nodeAttrs": [
+  {
+    "target": ["autogroup:member"],
+    "attr": ["funnel"]
+  }
+]
+```
+
+##### Start Funnel
+
+```bash
+tailscale serve funnel --bg http://localhost:18789
+```
+
+> **Note:** Use `http://localhost:18789` (not `https`). The Gateway serves plain HTTP;
+> Tailscale terminates TLS at the Funnel edge.
+
+##### Tailscale Serve (Tailnet-Only)
+
+If you only need agents on your tailnet to reach you (not the public internet),
+use Tailscale Serve instead of Funnel:
+
+```bash
+tailscale serve --bg http://localhost:18789
+```
+
+With Serve, traffic is restricted to your tailnet, so disabling authentication
+is reasonable.
+
+##### Stopping Funnel
+
+```bash
+tailscale serve funnel --https=443 off
+```
+
+#### 4. Verify
+
+Your OpenClaw should now have a public Agent Card:
+
+```
+https://your-machine.tail123.ts.net/.well-known/agent-card.json
+```
+
+#### 5. Generate an API Key
+
+The Agent Card is public, but for other people to send messages to your OpenClaw you'll need to generate an API key for them:
+
+```bash
+openclaw a2a generate-key alice
+```
+
+#### 6. Customise Your Agent Card
+
+The Agent Card will have default values.
+Once you've generated an API key, ask your OpenClaw to use the `a2a_update_agent_card` tool to update its Agent Card:
+
+> Update your Agent Card with the `a2a_update_agent_card` tool
+
+#### 7. Share Your URL and Key
+
+Send your Agent Card URL and the generated API key to the person you generated it for.
+They'll need to install the plugin and add your OpenClaw as a remote agent with the headers:
+
+```json
+"custom_headers": {
+    "Authorization": "Bearer [GENERATED API KEY]"
+}
+```
+
+### Tools
+
 The `a2a_update_agent_card` tool is registered when inbound is configured
 (`apiKeys` or `allowUnauthenticated`).
 
-### `a2a_update_agent_card`
+#### `a2a_update_agent_card`
 
 Live-update this agent's A2A Agent Card name, description, or skills. Changes
 take effect immediately and persist to config — no restart needed. At least one
@@ -735,12 +689,28 @@ Outbound task/file storage can be disabled with `outbound.taskStore: false` and 
 
 ## 🛠️ Development
 
+Install the dependencies:
+
 ```bash
-make install             # Install dependencies
-make install-hooks       # Install local git hooks
-make ci                  # Lint, typecheck, and test with coverage
-make fix                 # Auto-fix formatting and lint issues
-bun run build            # Compile to dist/
+make install
+```
+
+Install git hooks:
+
+```bash
+make install-hooks
+```
+
+Install the plugin:
+
+```bash
+openclaw plugins install /absolute/path/to/openclaw-a2a-plugin
+```
+
+Restart the gateway:
+
+```bash
+openclaw gateway restart
 ```
 
 ## 📄 License
