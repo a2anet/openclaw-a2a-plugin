@@ -4,7 +4,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentCard } from "@a2a-js/sdk";
-import type { DefaultRequestHandler } from "@a2a-js/sdk/server";
+import type { A2ARequestHandler } from "@a2a-js/sdk/server";
+import { JsonRpcTransportHandler } from "@a2a-js/sdk/server";
 
 import type { A2AInboundKey } from "../config.js";
 import { sendAuthError, validateApiKey } from "./auth.js";
@@ -65,19 +66,12 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
     res.end(JSON.stringify(body));
 }
 
-function sendJsonRpcError(res: ServerResponse, id: unknown, code: number, message: string) {
-    sendJson(res, 200, {
-        jsonrpc: "2.0",
-        id: id ?? null,
-        error: { code, message },
-    });
-}
-
 function setSseHeaders(res: ServerResponse) {
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders?.();
 }
 
@@ -88,7 +82,7 @@ export type A2AAuthConfig = {
 
 export type A2AHttpHandlerParams = {
     agentCard: AgentCard;
-    requestHandler: DefaultRequestHandler;
+    requestHandler: A2ARequestHandler;
     auth?: A2AAuthConfig;
 };
 
@@ -97,6 +91,7 @@ export type A2AHttpHandlerParams = {
  */
 export function createA2AHttpHandlers(params: A2AHttpHandlerParams) {
     const { agentCard, requestHandler, auth } = params;
+    const transportHandler = new JsonRpcTransportHandler(requestHandler);
 
     async function handleAgentCard(_req: IncomingMessage, res: ServerResponse): Promise<void> {
         sendJson(res, 200, agentCard);
@@ -120,94 +115,32 @@ export function createA2AHttpHandlers(params: A2AHttpHandlerParams) {
 
         const bodyResult = await readJsonBody(req);
         if (!bodyResult.ok) {
-            sendJsonRpcError(res, null, -32700, bodyResult.error);
+            sendJson(res, 400, {
+                jsonrpc: "2.0",
+                id: null,
+                error: { code: -32700, message: bodyResult.error },
+            });
             return;
         }
 
-        const body = bodyResult.value as Record<string, unknown>;
-        const id = body.id;
-        const method = body.method;
-        const bodyParams = body.params as Record<string, unknown> | undefined;
+        const rpcResponseOrStream = await transportHandler.handle(bodyResult.value);
 
-        if (body.jsonrpc !== "2.0") {
-            sendJsonRpcError(res, id, -32600, "Invalid Request: jsonrpc must be 2.0");
-            return;
-        }
-
-        if (typeof method !== "string") {
-            sendJsonRpcError(res, id, -32600, "Invalid Request: method must be a string");
-            return;
-        }
-
-        try {
-            switch (method) {
-                case "message/send": {
-                    const message = bodyParams?.message;
-                    if (!message || typeof message !== "object") {
-                        sendJsonRpcError(res, id, -32602, "Invalid params: message required");
-                        return;
-                    }
-                    const sendParams = { ...bodyParams } as unknown as Parameters<
-                        typeof requestHandler.sendMessage
-                    >[0];
-                    const result = await requestHandler.sendMessage(sendParams);
-                    sendJson(res, 200, { jsonrpc: "2.0", id, result });
-                    break;
+        if (typeof (rpcResponseOrStream as AsyncGenerator)?.[Symbol.asyncIterator] === "function") {
+            const stream = rpcResponseOrStream as AsyncGenerator<unknown, void, undefined>;
+            setSseHeaders(res);
+            try {
+                for await (const event of stream) {
+                    res.write(`data: ${JSON.stringify(event)}\n\n`);
                 }
-
-                case "message/stream": {
-                    const message = bodyParams?.message;
-                    if (!message || typeof message !== "object") {
-                        sendJsonRpcError(res, id, -32602, "Invalid params: message required");
-                        return;
-                    }
-                    setSseHeaders(res);
-                    const streamParams = { ...bodyParams } as unknown as Parameters<
-                        typeof requestHandler.sendMessageStream
-                    >[0];
-                    const stream = await requestHandler.sendMessageStream(streamParams);
-                    for await (const event of stream) {
-                        res.write(`data: ${JSON.stringify(event)}\n\n`);
-                    }
-                    res.write("data: [DONE]\n\n");
+            } catch (err) {
+                console.error("Error during SSE streaming:", err);
+            } finally {
+                if (!res.writableEnded) {
                     res.end();
-                    break;
                 }
-
-                case "tasks/get": {
-                    const taskId = bodyParams?.id ?? bodyParams?.taskId;
-                    if (typeof taskId !== "string") {
-                        sendJsonRpcError(res, id, -32602, "Invalid params: id required");
-                        return;
-                    }
-                    const result = await requestHandler.getTask({
-                        id: taskId,
-                        historyLength:
-                            typeof bodyParams?.historyLength === "number"
-                                ? bodyParams.historyLength
-                                : undefined,
-                    });
-                    sendJson(res, 200, { jsonrpc: "2.0", id, result });
-                    break;
-                }
-
-                case "tasks/cancel": {
-                    const taskId = bodyParams?.id ?? bodyParams?.taskId;
-                    if (typeof taskId !== "string") {
-                        sendJsonRpcError(res, id, -32602, "Invalid params: id required");
-                        return;
-                    }
-                    const result = await requestHandler.cancelTask({ id: taskId });
-                    sendJson(res, 200, { jsonrpc: "2.0", id, result });
-                    break;
-                }
-
-                default:
-                    sendJsonRpcError(res, id, -32601, `Method not found: ${method}`);
             }
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            sendJsonRpcError(res, id, -32000, `Server error: ${message}`);
+        } else {
+            sendJson(res, 200, rpcResponseOrStream);
         }
     }
 
