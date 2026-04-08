@@ -13,5 +13,11 @@ Add high-level coding guidelines and review notes to this file. Specific actiona
 ## Engineering Guidelines
 
 - Constants and utility functions should be kept in a constants or utility file if used by more than one class. Otherwise they should be in the class.
-- Do not write defensive compatibility code for outdated dependency APIs. When a package changes shape, update this plugin to the current upstream API instead of carrying shims for older versions.
-- Keep `README.md` and source comments focused on the current codebase. Do not leave behind notes about previous implementations, migrations, or removed workarounds unless that historical context is still directly relevant to understanding the current behavior.
+- Keep text in `README.md`, `AGENTS.md`, comments, etc. focused on the current codebase. Do not leave behind notes about previous implementations, migrations, or removed workarounds.
+- Do not write defensive compatibility code for updated packages. When a package is updated, refactor the code to work with the new version.
+
+## Codex
+
+This is guidance for Codex only.
+
+- Do not pass raw backticks through shell-interpreted inline `git commit -m` arguments. If a commit message needs backticks, use a method that cannot be shell-expanded first.
