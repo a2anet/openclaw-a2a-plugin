@@ -141,6 +141,13 @@ const a2aPlugin = definePluginEntry({
                     );
                     httpHandlers = createA2AHttpHandlers({
                         agentCard,
+                        getAgentCard: (req) =>
+                            buildAgentCard({
+                                openclawConfig: api.config,
+                                pluginConfig: livePluginConfig,
+                                publicUrl: resolveRequestPublicUrl(req),
+                                authRequired,
+                            }),
                         requestHandler,
                         auth: authConfig,
                     });
@@ -156,8 +163,12 @@ const a2aPlugin = definePluginEntry({
             return initPromise;
         };
 
-        function resolvePublicUrl(req: import("node:http").IncomingMessage): string {
-            const host = req.headers.host || "localhost";
+        function resolveRequestPublicUrl(req: import("node:http").IncomingMessage): string {
+            const forwardedHost = req.headers["x-forwarded-host"];
+            const host =
+                typeof forwardedHost === "string"
+                    ? forwardedHost.split(",")[0].trim()
+                    : req.headers.host || "localhost";
             const rawProto = req.headers["x-forwarded-proto"];
             const protocol =
                 typeof rawProto === "string"
@@ -173,7 +184,7 @@ const a2aPlugin = definePluginEntry({
             auth: "plugin",
             handler: async (req, res) => {
                 if (!httpHandlers) {
-                    await initializeInbound(resolvePublicUrl(req));
+                    await initializeInbound(resolveRequestPublicUrl(req));
                 }
                 if (httpHandlers) {
                     await httpHandlers.handleAgentCard(req, res);
@@ -186,7 +197,7 @@ const a2aPlugin = definePluginEntry({
             auth: "plugin",
             handler: async (req, res) => {
                 if (!httpHandlers) {
-                    await initializeInbound(resolvePublicUrl(req));
+                    await initializeInbound(resolveRequestPublicUrl(req));
                 }
                 if (httpHandlers) {
                     await httpHandlers.handleJsonRpc(req, res);

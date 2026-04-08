@@ -113,6 +113,26 @@ describe("handleAgentCard", () => {
         expect(res.getStatusCode()).toBe(200);
         expect(res.getJson()).toEqual(card);
     });
+
+    test("returns a request-scoped agent card when a provider is supplied", async () => {
+        const card = makeAgentCard();
+        const handlers = createA2AHttpHandlers({
+            agentCard: card,
+            getAgentCard: (req) => ({
+                ...card,
+                url: `https://${req.headers.host}/a2a`,
+            }),
+            requestHandler: makeMockRequestHandler(),
+        });
+        const req = makeReq("GET", undefined, { host: "local.example.test" });
+        const res = makeRes();
+        await handlers.handleAgentCard(req, res);
+        expect(res.getStatusCode()).toBe(200);
+        expect(res.getJson()).toEqual({
+            ...card,
+            url: "https://local.example.test/a2a",
+        });
+    });
 });
 
 describe("handleJsonRpc", () => {

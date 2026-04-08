@@ -82,6 +82,7 @@ export type A2AAuthConfig = {
 
 export type A2AHttpHandlerParams = {
     agentCard: AgentCard;
+    getAgentCard?: (req: IncomingMessage) => AgentCard;
     requestHandler: A2ARequestHandler;
     auth?: A2AAuthConfig;
 };
@@ -90,11 +91,11 @@ export type A2AHttpHandlerParams = {
  * Create HTTP handlers for A2A protocol endpoints.
  */
 export function createA2AHttpHandlers(params: A2AHttpHandlerParams) {
-    const { agentCard, requestHandler, auth } = params;
+    const { agentCard, getAgentCard, requestHandler, auth } = params;
     const transportHandler = new JsonRpcTransportHandler(requestHandler);
 
-    async function handleAgentCard(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-        sendJson(res, 200, agentCard);
+    async function handleAgentCard(req: IncomingMessage, res: ServerResponse): Promise<void> {
+        sendJson(res, 200, getAgentCard?.(req) ?? agentCard);
     }
 
     async function handleJsonRpc(req: IncomingMessage, res: ServerResponse): Promise<void> {
