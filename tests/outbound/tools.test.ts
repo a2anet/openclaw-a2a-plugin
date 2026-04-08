@@ -27,6 +27,7 @@ describe("createOutboundTools", () => {
         const tools = createOutboundTools({
             agents: { test: { url: "https://example.com/agent-card.json" } },
             stateDir: tmpDir(),
+            workspaceDir: tmpDir(),
         });
         expect(tools).toHaveLength(6);
     });
@@ -35,6 +36,7 @@ describe("createOutboundTools", () => {
         const tools = createOutboundTools({
             agents: { test: { url: "https://example.com/agent-card.json" } },
             stateDir: tmpDir(),
+            workspaceDir: tmpDir(),
         });
         const names = tools.map((t) => t.name);
         expect(names).toEqual([
@@ -51,6 +53,7 @@ describe("createOutboundTools", () => {
         const tools = createOutboundTools({
             agents: { test: { url: "https://example.com/agent-card.json" } },
             stateDir: tmpDir(),
+            workspaceDir: tmpDir(),
         });
         for (const tool of tools) {
             expect(tool.description).toBeTruthy();
@@ -63,6 +66,7 @@ describe("createOutboundTools", () => {
         const tools = createOutboundTools({
             agents: { test: { url: "https://example.com/agent-card.json" } },
             stateDir: tmpDir(),
+            workspaceDir: tmpDir(),
             taskStore: true,
             fileStore: true,
             agentCardTimeout: 30,
@@ -80,6 +84,7 @@ describe("createOutboundTools", () => {
         const tools = createOutboundTools({
             agents: { test: { url: "https://example.com/agent-card.json" } },
             stateDir: tmpDir(),
+            workspaceDir: tmpDir(),
             taskStore: false,
             fileStore: false,
         });
@@ -91,6 +96,7 @@ describe("createOutboundTools", () => {
         createOutboundTools({
             agents: { test: { url: "https://example.com/agent-card.json" } },
             stateDir: dir,
+            workspaceDir: dir,
         });
         // JSONTaskStore and LocalFileStore create dirs async, but we can check the path pattern
         // by verifying the tools were created without error

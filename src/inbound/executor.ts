@@ -13,35 +13,40 @@ import type {
     TextPart,
 } from "@a2a-js/sdk";
 import type { AgentExecutor, ExecutionEventBus, RequestContext } from "@a2a-js/sdk/server";
-import type { FileStore } from "@a2anet/a2a-utils";
+import { type FileStore, LocalFileStore } from "@a2anet/a2a-utils";
+import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
+import { dispatchInboundReplyWithBase } from "openclaw/plugin-sdk/inbound-reply-dispatch";
+import { resolveOutboundMediaUrls } from "openclaw/plugin-sdk/reply-payload";
 
-import type { GatewayCallResult } from "./gateway-call.js";
-
-type GatewayCall = (params: {
-    method: string;
-    params?: Record<string, unknown>;
-    timeoutMs?: number;
-}) => Promise<GatewayCallResult>;
+const CHANNEL_ID = "a2a";
 
 export type OpenClawExecutorParams = {
     agentId: string;
-    callGateway: GatewayCall;
+    runtime: PluginRuntime;
+    config: OpenClawConfig;
     fileStore?: FileStore | null;
+    workspaceDir: string;
 };
 
 /**
- * Bridges inbound A2A protocol requests to OpenClaw's agent via gateway WebSocket RPC.
+ * Bridges inbound A2A protocol requests into OpenClaw's shared auto-reply pipeline.
  */
 export class OpenClawExecutor implements AgentExecutor {
     private abortControllers = new Map<string, AbortController>();
     private agentId: string;
-    private callGateway: GatewayCall;
+    private runtime: PluginRuntime;
+    private config: OpenClawConfig;
     private fileStore: FileStore | null;
 
     constructor(params: OpenClawExecutorParams) {
         this.agentId = params.agentId;
-        this.callGateway = params.callGateway;
-        this.fileStore = params.fileStore ?? null;
+        this.runtime = params.runtime;
+        this.config = params.config;
+        this.fileStore =
+            params.fileStore === null
+                ? null
+                : (params.fileStore ??
+                  new LocalFileStore(path.join(params.workspaceDir, "a2a", "inbound", "files")));
     }
 
     execute = async (
@@ -52,26 +57,21 @@ export class OpenClawExecutor implements AgentExecutor {
         const effectiveContextId = requestContext.contextId ?? crypto.randomUUID();
         const abortController = new AbortController();
         this.abortControllers.set(taskId, abortController);
-        const sessionKey = `agent:${this.agentId}:a2a:${effectiveContextId}`;
 
-        // Extract text parts
         const textSegments = userMessage.parts
             .filter((p: { kind: string }): p is TextPart => p.kind === "text")
             .map((p: TextPart) => p.text);
 
-        // Extract data parts
         const dataParts = userMessage.parts.filter(
             (p: { kind: string }): p is DataPart => p.kind === "data",
         );
 
-        // Save file parts via fileStore
         let savedFilePaths: string[] = [];
         const hasFiles = userMessage.parts.some((p) => p.kind === "file");
         if (this.fileStore && hasFiles) {
             savedFilePaths = await this.fileStore.saveMessage(userMessage);
         }
 
-        // Build gateway message text with XML tags for structured content
         let gatewayText = textSegments.join("\n");
 
         if (dataParts.length > 0) {
@@ -105,6 +105,11 @@ export class OpenClawExecutor implements AgentExecutor {
         }
 
         try {
+            const sessionKey = this.runtime.channel.routing.buildAgentSessionKey({
+                agentId: this.agentId,
+                channel: CHANNEL_ID,
+                peer: { kind: "direct", id: effectiveContextId },
+            });
             const initialTask = {
                 kind: "task" as const,
                 id: taskId,
@@ -117,50 +122,79 @@ export class OpenClawExecutor implements AgentExecutor {
             } satisfies Task;
             eventBus.publish(initialTask);
 
-            const result = await this.callGateway({
-                method: "agent",
-                params: {
-                    message: gatewayText,
-                    sessionKey,
-                    agentId: this.agentId,
-                    deliver: false,
-                    idempotencyKey: crypto.randomUUID(),
+            const finalizedCtx = this.runtime.channel.reply.finalizeInboundContext({
+                Body: gatewayText,
+                BodyForAgent: gatewayText,
+                RawBody: gatewayText,
+                CommandBody: gatewayText,
+                BodyForCommands: gatewayText,
+                From: `a2a:${effectiveContextId}`,
+                To: `a2a:${this.agentId}`,
+                SessionKey: sessionKey,
+                SenderId: `a2a:${effectiveContextId}`,
+                SenderName: "Remote A2A Agent",
+                Provider: CHANNEL_ID,
+                Surface: CHANNEL_ID,
+                ChatType: "direct",
+                ConversationLabel: effectiveContextId,
+                InputProvenance: { kind: "external_user", sourceChannel: CHANNEL_ID },
+                ForceSenderIsOwnerFalse: true,
+                Timestamp: Date.now(),
+                CommandAuthorized: false,
+            });
+            const storePath = this.runtime.channel.session.resolveStorePath(
+                this.config.session?.store,
+                { agentId: this.agentId },
+            );
+            const artifactParts: Part[] = [];
+            let dispatchError: unknown;
+
+            await dispatchInboundReplyWithBase({
+                cfg: this.config,
+                channel: CHANNEL_ID,
+                route: { agentId: this.agentId, sessionKey },
+                storePath,
+                ctxPayload: finalizedCtx,
+                core: {
+                    channel: {
+                        session: this.runtime.channel.session,
+                        reply: this.runtime.channel.reply,
+                    },
                 },
+                deliver: async (payload: {
+                    text?: string;
+                    mediaUrls?: string[];
+                    mediaUrl?: string;
+                }) => {
+                    if (abortController.signal.aborted) {
+                        return;
+                    }
+                    if (payload.text) {
+                        artifactParts.push({ kind: "text", text: payload.text });
+                    }
+                    for (const url of resolveOutboundMediaUrls(payload)) {
+                        artifactParts.push({
+                            kind: "file",
+                            file: { uri: url },
+                        } as Part);
+                    }
+                },
+                onRecordError: (err: unknown) => {
+                    console.error(`[a2a] failed recording inbound session: ${String(err)}`);
+                },
+                onDispatchError: (err: unknown, info: { kind: string }) => {
+                    dispatchError ??= err;
+                    console.error(`[a2a] failed dispatching ${info.kind} reply: ${String(err)}`);
+                },
+                replyOptions: { abortSignal: abortController.signal },
             });
 
             if (abortController.signal.aborted) {
                 return;
             }
 
-            if (!result.ok) {
-                throw new Error(result.error ?? "Agent execution failed");
-            }
-
-            type AgentPayload = {
-                status?: string;
-                summary?: string;
-                result?: {
-                    payloads?: Array<{ text: string; mediaUrl?: string | null }>;
-                };
-            };
-            const data = result.data as AgentPayload | undefined;
-
-            if (data?.status === "error") {
-                throw new Error(data.summary ?? "Agent execution failed");
-            }
-
-            // Build artifact parts from payloads
-            const artifactParts: Part[] = [];
-            for (const payload of data?.result?.payloads ?? []) {
-                if (payload.text) {
-                    artifactParts.push({ kind: "text" as const, text: payload.text });
-                }
-                if (payload.mediaUrl) {
-                    artifactParts.push({
-                        kind: "file",
-                        file: { uri: payload.mediaUrl },
-                    } as Part);
-                }
+            if (dispatchError) {
+                throw dispatchError;
             }
 
             if (artifactParts.length === 0) {

@@ -246,7 +246,6 @@ endpoint. Follow the steps below to make your agent reachable.
 | `agentCard.skills`      | `array`   | `[]`                                 | Skills to advertise. Each needs `id`, `name`, `description`. Optional: `tags`, `examples`, `inputModes`, `outputModes`. Can also be set at runtime with `a2a_update_agent_card`. |
 | `apiKeys`               | `array`   | —                                    | Array of `{ label, key }` objects for inbound auth.                                                                                                                              |
 | `allowUnauthenticated`  | `boolean` | `false`                              | Skip API key validation for inbound requests.                                                                                                                                    |
-| `gatewayTimeout`        | `number`  | `300`                                | Timeout in seconds for gateway calls to the local OpenClaw agent.                                                                                                                |
 
 #### 2. Restart the Gateway
 
@@ -421,15 +420,39 @@ field must be provided.
 | `-32001` | Authentication required |
 | `-32000` | Server error            |
 
+## 🦞 OpenClaw Implementation
+
+### What happens when a remote agent sends you a message
+
+1. **HTTP entry.** The remote agent POSTs A2A JSON-RPC to `/a2a`. The HTTP handler enforces a 1 MB body limit and validates the `Authorization: Bearer <key>` header against your configured API keys using a timing-safe comparison. With no keys configured the endpoint rejects every request unless you explicitly set `allowUnauthenticated: true`.
+2. **Parts are unpacked.** Text parts are concatenated. Data parts are serialized and wrapped in `<data><item>…</item></data>` tags. File parts are written to `<workspace>/a2a/inbound/files/` via the inbound `LocalFileStore`, and the saved paths are listed back to the agent inside `<files><file>…</file></files>` tags. Files are stored under the workspace so the agent's normal filesystem tools can read them.
+3. **Inbound context is built.** The plugin assembles an OpenClaw `MsgContext` with the unpacked text as `Body` / `BodyForAgent`, `Provider: "a2a"`, `Surface: "a2a"`, `From: "a2a:<contextId>"`, `To: "a2a:<agentId>"`, `ChatType: "direct"`, `InputProvenance: { kind: "external_user", sourceChannel: "a2a" }`, and `CommandAuthorized: false`. It then runs the context through `finalizeInboundContext`, which sanitizes the body, enforces the strict-boolean default-deny on `CommandAuthorized`, and resolves the conversation label.
+4. **Session is recorded.** `dispatchInboundReplyWithBase` calls `recordInboundSession` to write the inbound turn into OpenClaw's normal session store (the same `sessions.json` your other channels use, resolved from `config.session.store` via `resolveStorePath`), keyed by `agent:<agentId>:a2a:direct:<contextId>`. From this point on the conversation is a normal OpenClaw session — follow-up A2A turns with the same `contextId` resume it.
+5. **Reply runs through the agent runtime.** The shared inbound dispatcher invokes the buffered block dispatcher, which loads the agent's full configuration (model, system prompt, MCP servers, tool allowlists, sandbox policy, command auth) and runs a normal reply turn with the message body as the user prompt. The agent has access to every tool it would normally have on any other channel.
+6. **Reply parts become A2A artifacts.** As the dispatcher streams text and media URLs back via the `deliver` callback, the executor converts them into A2A `TextPart` and `FilePart` artifact parts and publishes them on the A2A event bus, followed by a terminal `completed` (or `failed`) status update.
+
+### What the agent can and cannot do on behalf of the remote caller
+
+- **The agent runs with its full normal capabilities.** Whatever tools, MCP servers, and shell access you've granted your OpenClaw agent are reachable to a remote A2A request once it has been authenticated. Treat A2A API keys with the same care as any other agent credential — anyone holding one can issue prompts that your agent will execute under its own identity.
+- **The remote caller is not your owner.** OpenClaw's command authorization (`resolveCommandAuthorization`) computes `senderIsOwner` by matching the inbound `From`/`SenderId` against your provider allowlists. The A2A plugin presents the sender as `a2a:<contextId>` under the `a2a` provider, which is not a registered channel and is not in any owner allowlist, so the sender is never resolved as owner. Combined with the `CommandAuthorized: false` default-deny, this means remote A2A callers cannot trigger owner-only text commands (`/think`, `/reset`, model-switching commands, etc.) through this channel.
+- **The message is marked as untrusted external input.** Because `InputProvenance.kind` is `external_user`, the agent's persisted user message is tagged as coming from outside the operator. Hooks and tools that branch on provenance (e.g. inter-session vs. external_user vs. internal_system) will see A2A traffic as external. The plugin also runs the body through `sanitizeInboundSystemTags` via `finalizeInboundContext`, so attempts to smuggle synthetic envelope headers in the message text are stripped before the agent sees them.
+- **Agent policy is still the authority.** Sandbox/tool allowlists, MCP server allowlists, exec approvals, dm/group policies, and any custom hooks all run exactly as they would for a local request. The plugin does not bypass any of them — if you don't want a remote A2A caller to be able to read `~/.ssh`, restrict it at the agent's tool/sandbox config the same way you would for any other channel.
+
+### Storage and secret boundaries
+
+- HTTP JSON bodies are capped at 1 MB by the inbound handler.
+- Inbound files land in `<workspace>/a2a/inbound/files/`; outbound artifacts in `<workspace>/a2a/outbound/files/`. Task state for both directions lives under `<state>/a2a/{inbound,outbound}/tasks/`, separate from file storage.
+- Inbound API keys are generated from 32 random bytes by `openclaw a2a generate-key` and only ever shared with agents you authorize. Outbound `custom_headers` support `${ENV_VAR}` substitution so remote-agent credentials stay in your environment instead of your config file.
+
 ## 💾 Data Storage
 
-Tasks and file artifacts are saved locally within OpenClaw's workspace directory, separated by direction:
+Tasks and file artifacts are saved locally, separated by direction. Task state lives under OpenClaw's state directory; file artifacts live under OpenClaw's workspace directory so the agent can access received files.
 
 | Direction | Type  | Path                              |
 | --------- | ----- | --------------------------------- |
-| Outbound  | Tasks | `<workspace>/a2a/outbound/tasks/` |
+| Outbound  | Tasks | `<state>/a2a/outbound/tasks/`     |
 | Outbound  | Files | `<workspace>/a2a/outbound/files/` |
-| Inbound   | Tasks | `<workspace>/a2a/inbound/tasks/`  |
+| Inbound   | Tasks | `<state>/a2a/inbound/tasks/`      |
 | Inbound   | Files | `<workspace>/a2a/inbound/files/`  |
 
 Outbound task/file storage can be disabled with `outbound.taskStore: false` and `outbound.fileStore: false`.

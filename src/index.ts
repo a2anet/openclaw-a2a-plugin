@@ -4,9 +4,8 @@
 
 export const VERSION = "0.1.0"; // x-release-please-version
 
-import path from "node:path";
 import type { AgentCard } from "@a2a-js/sdk";
-import { DefaultRequestHandler, InMemoryTaskStore } from "@a2a-js/sdk/server";
+import { DefaultRequestHandler } from "@a2a-js/sdk/server";
 import { JSONTaskStore, LocalFileStore } from "@a2anet/a2a-utils";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
@@ -67,6 +66,7 @@ const a2aPlugin = definePluginEntry({
     register(api: OpenClawPluginApi) {
         const pluginConfig = parseA2APluginConfig(api.pluginConfig);
         const stateDir = api.runtime.state.resolveStateDir();
+        const workspaceDir = api.config.agents?.defaults?.workspace ?? process.cwd();
 
         // --- Outbound tools (via @a2anet/a2a-utils) ---
         const outbound = pluginConfig.outbound;
@@ -74,6 +74,7 @@ const a2aPlugin = definePluginEntry({
             const tools = createOutboundTools({
                 agents: outbound.agents,
                 stateDir,
+                workspaceDir,
                 taskStore: outbound.taskStore,
                 fileStore: outbound.fileStore,
                 agentCardTimeout: outbound.agentCardTimeout,
@@ -124,78 +125,13 @@ const a2aPlugin = definePluginEntry({
                     });
 
                     const taskStore = new JSONTaskStore(`${stateDir}/a2a/inbound/tasks`);
-                    const fileStore = new LocalFileStore(`${stateDir}/a2a/inbound/files`);
-                    const gatewayTimeoutMs =
-                        (livePluginConfig.inbound?.gatewayTimeout ?? 300) * 1000;
+                    const fileStore = new LocalFileStore(`${workspaceDir}/a2a/inbound/files`);
                     const executor = new OpenClawExecutor({
                         agentId: "main",
-                        callGateway: async (params) => {
-                            if (params.method !== "agent") {
-                                return { ok: false, error: `Unsupported method: ${params.method}` };
-                            }
-                            const request = (params.params ?? {}) as Record<string, unknown>;
-                            const sessionKey =
-                                typeof request.sessionKey === "string"
-                                    ? request.sessionKey
-                                    : `a2a-${Date.now()}`;
-                            const agentId =
-                                typeof request.agentId === "string" ? request.agentId : "main";
-                            const prompt =
-                                typeof request.message === "string" ? request.message : "";
-                            const sessionId = sessionKey.replace(/[^a-zA-Z0-9._-]/g, "_");
-                            const sessionFile = path.join(
-                                stateDir,
-                                "a2a",
-                                "inbound",
-                                "sessions",
-                                `${sessionId}.json`,
-                            );
-                            const configuredModel = api.config.agents?.defaults?.model;
-                            const primaryModel =
-                                typeof configuredModel === "string"
-                                    ? configuredModel
-                                    : configuredModel?.primary;
-                            const slashIndex =
-                                typeof primaryModel === "string" ? primaryModel.indexOf("/") : -1;
-                            const provider =
-                                typeof primaryModel === "string" && slashIndex > 0
-                                    ? primaryModel.slice(0, slashIndex)
-                                    : undefined;
-                            const model =
-                                typeof primaryModel === "string" && slashIndex > 0
-                                    ? primaryModel.slice(slashIndex + 1)
-                                    : undefined;
-
-                            try {
-                                const result = await api.runtime.agent.runEmbeddedPiAgent({
-                                    sessionId,
-                                    sessionKey,
-                                    sessionFile,
-                                    workspaceDir:
-                                        api.config.agents?.defaults?.workspace ?? process.cwd(),
-                                    config: api.config,
-                                    prompt,
-                                    timeoutMs: params.timeoutMs ?? gatewayTimeoutMs,
-                                    runId: `a2a-${Date.now()}`,
-                                    agentId,
-                                    provider,
-                                    model,
-                                });
-                                return {
-                                    ok: true,
-                                    data: {
-                                        status: "success",
-                                        result,
-                                    },
-                                };
-                            } catch (err) {
-                                return {
-                                    ok: false,
-                                    error: err instanceof Error ? err.message : String(err),
-                                };
-                            }
-                        },
+                        runtime: api.runtime,
+                        config: api.config,
                         fileStore,
+                        workspaceDir,
                     });
 
                     const requestHandler = new DefaultRequestHandler(
@@ -223,7 +159,12 @@ const a2aPlugin = definePluginEntry({
         function resolvePublicUrl(req: import("node:http").IncomingMessage): string {
             const host = req.headers.host || "localhost";
             const rawProto = req.headers["x-forwarded-proto"];
-            const protocol = typeof rawProto === "string" ? rawProto.split(",")[0].trim() : (req.socket as import("node:tls").TLSSocket).encrypted ? "https" : "http";
+            const protocol =
+                typeof rawProto === "string"
+                    ? rawProto.split(",")[0].trim()
+                    : (req.socket as import("node:tls").TLSSocket).encrypted
+                      ? "https"
+                      : "http";
             return `${protocol}://${host}`;
         }
 

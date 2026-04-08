@@ -38,15 +38,18 @@
         "@a2a-js/sdk": "^0.3.10",
         "@a2anet/a2a-utils": "^0.6.0",
         "@sinclair/typebox": "^0.34.0",
-        "ws": "^8.19.0"
+        "ws": "^8.19.0",
+        "zod": "^3.25.0",
+        "zod-to-json-schema": "^3.25.1"
     },
     "peerDependencies": {
-        "openclaw": "*"
+        "openclaw": ">=2026.4.8"
     },
     "devDependencies": {
         "@biomejs/biome": "^1.9.0",
         "@types/bun": "latest",
         "@types/ws": "^8.0.0",
+        "openclaw": "^2026.4.8",
         "typescript": "^5.7.0"
     },
     "trustedDependencies": ["@biomejs/biome"]

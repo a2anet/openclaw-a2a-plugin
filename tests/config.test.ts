@@ -180,13 +180,6 @@ describe("parseA2APluginConfig", () => {
         });
         expect(result.inbound?.apiKeys).toEqual([{ label: "good", key: "abc" }]);
     });
-
-    test("parses inbound gateway timeout", () => {
-        const result = parseA2APluginConfig({
-            inbound: { gatewayTimeout: 600 },
-        });
-        expect(result.inbound?.gatewayTimeout).toBe(600);
-    });
 });
 
 describe("buildRootConfigWithA2A", () => {

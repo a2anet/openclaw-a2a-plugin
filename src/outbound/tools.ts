@@ -18,6 +18,7 @@ import { type AgentTool, jsonResult } from "../types.js";
 export type CreateOutboundToolsParams = {
     agents: Record<string, A2AAgentEntry>;
     stateDir: string;
+    workspaceDir: string;
     taskStore?: boolean;
     fileStore?: boolean;
     agentCardTimeout?: number;
@@ -48,7 +49,7 @@ export function createOutboundTools(params: CreateOutboundToolsParams): AgentToo
             : undefined;
     const fileStore =
         params.fileStore !== false
-            ? new LocalFileStore(`${params.stateDir}/a2a/outbound/files`)
+            ? new LocalFileStore(`${params.workspaceDir}/a2a/outbound/files`)
             : undefined;
 
     const session = new A2ASession(agents, {

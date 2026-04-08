@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import type { Message } from "@a2a-js/sdk";
 import type { ExecutionEventBus, RequestContext } from "@a2a-js/sdk/server";
 
@@ -36,34 +36,107 @@ function makeEventBus() {
     } as unknown as ExecutionEventBus & { events: unknown[] };
 }
 
+function makeRuntime(options?: {
+    onDispatch?: (params: Record<string, unknown>) => Promise<void>;
+    sessionKey?: string;
+    storePath?: string;
+}) {
+    const sessionKey = options?.sessionKey ?? "agent:main:a2a:direct:ctx-1";
+    const storePath = options?.storePath ?? "/tmp/sessions.json";
+
+    const buildAgentSessionKey = mock(() => sessionKey);
+    const finalizeInboundContext = mock((ctx: Record<string, unknown>) => ctx);
+    const recordInboundSession = mock(async () => undefined);
+    const resolveStorePath = mock(() => storePath);
+    const dispatchReplyWithBufferedBlockDispatcher = mock(
+        async (params: Record<string, unknown>) => {
+            if (options?.onDispatch) {
+                await options.onDispatch(params);
+                return;
+            }
+            const dispatcherOptions = params.dispatcherOptions as {
+                deliver?: (payload: { text?: string }) => Promise<void>;
+            };
+            await dispatcherOptions.deliver?.({ text: "Hello back!" });
+        },
+    );
+
+    return {
+        runtime: {
+            channel: {
+                routing: {
+                    buildAgentSessionKey,
+                },
+                reply: {
+                    finalizeInboundContext,
+                    dispatchReplyWithBufferedBlockDispatcher,
+                },
+                session: {
+                    resolveStorePath,
+                    recordInboundSession,
+                },
+            },
+        } as const,
+        mocks: {
+            buildAgentSessionKey,
+            finalizeInboundContext,
+            recordInboundSession,
+            resolveStorePath,
+            dispatchReplyWithBufferedBlockDispatcher,
+        },
+    };
+}
+
 describe("OpenClawExecutor", () => {
     test("publishes artifact and completed status on success", async () => {
-        const callGateway = mock(async () => ({
-            ok: true as const,
-            data: {
-                status: "done",
-                result: { payloads: [{ text: "Hello back!" }] },
-            },
-        }));
-
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
+        const runtime = makeRuntime();
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
         const eventBus = makeEventBus();
+
         await executor.execute(makeContext(), eventBus);
 
-        // Should have: task (working), artifact-update, status-update (completed)
         expect(eventBus.events.length).toBe(3);
         expect((eventBus.events[0] as Record<string, unknown>).kind).toBe("task");
         expect((eventBus.events[1] as Record<string, unknown>).kind).toBe("artifact-update");
         expect((eventBus.events[2] as Record<string, unknown>).kind).toBe("status-update");
-
-        const status = eventBus.events[2] as Record<string, { state: string }>;
-        expect(status.status.state).toBe("completed");
+        expect((eventBus.events[2] as Record<string, { state: string }>).status.state).toBe(
+            "completed",
+        );
         expect(eventBus.finished).toHaveBeenCalledTimes(1);
+        expect(runtime.mocks.buildAgentSessionKey).toHaveBeenCalledWith({
+            agentId: "main",
+            channel: "a2a",
+            peer: { kind: "direct", id: "ctx-1" },
+        });
+        expect(runtime.mocks.recordInboundSession).toHaveBeenCalledTimes(1);
+        const recordArgs = runtime.mocks.recordInboundSession.mock.calls[0]?.[0] as Record<
+            string,
+            unknown
+        >;
+        expect(recordArgs.storePath).toBe("/tmp/sessions.json");
+        expect(recordArgs.sessionKey).toBe("agent:main:a2a:direct:ctx-1");
+        expect(recordArgs.ctx).toMatchObject({
+            ForceSenderIsOwnerFalse: true,
+            CommandAuthorized: false,
+            InputProvenance: { kind: "external_user", sourceChannel: "a2a" },
+            Provider: "a2a",
+            Surface: "a2a",
+        });
     });
 
     test("publishes error message for empty text", async () => {
-        const callGateway = mock(async () => ({ ok: true as const }));
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
+        const runtime = makeRuntime();
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
         const eventBus = makeEventBus();
 
         const ctx = makeContext({
@@ -77,183 +150,308 @@ describe("OpenClawExecutor", () => {
 
         expect(eventBus.events.length).toBe(1);
         expect((eventBus.events[0] as Record<string, unknown>).kind).toBe("message");
-        expect(callGateway).not.toHaveBeenCalled();
+        expect(runtime.mocks.buildAgentSessionKey).not.toHaveBeenCalled();
         expect(eventBus.finished).toHaveBeenCalledTimes(1);
     });
 
-    test("publishes failed status with error message on gateway error", async () => {
-        const callGateway = mock(async () => ({
-            ok: false as const,
-            error: "Connection refused",
-        }));
+    test("publishes failed status when dispatch reports an error", async () => {
+        const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const runtime = makeRuntime({
+                onDispatch: async (params) => {
+                    const dispatcherOptions = params.dispatcherOptions as {
+                        onError?: (err: unknown, info: { kind: string }) => void;
+                    };
+                    dispatcherOptions.onError?.(new Error("Connection refused"), {
+                        kind: "final",
+                    });
+                },
+            });
+            const executor = new OpenClawExecutor({
+                agentId: "main",
+                runtime: runtime.runtime as never,
+                config: {} as never,
+                workspaceDir: "/workspace",
+            });
+            const eventBus = makeEventBus();
 
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
-        const eventBus = makeEventBus();
-        await executor.execute(makeContext(), eventBus);
+            await executor.execute(makeContext(), eventBus);
 
-        // task (working) + status-update (failed)
-        expect(eventBus.events.length).toBe(2);
-        const failedEvent = eventBus.events[1] as Record<string, unknown>;
-        expect(failedEvent.kind).toBe("status-update");
-        const status = failedEvent.status as Record<string, unknown>;
-        expect(status.state).toBe("failed");
-        // Verify error text is included in the message
-        const msg = status.message as Record<string, unknown>;
-        expect(msg.role).toBe("agent");
-        const parts = msg.parts as Array<{ text: string }>;
-        expect(parts[0].text).toBe("Connection refused");
-        expect(eventBus.finished).toHaveBeenCalledTimes(1);
-    });
-
-    test("publishes failed status on agent error payload", async () => {
-        const callGateway = mock(async () => ({
-            ok: true as const,
-            data: { status: "error", summary: "Tool not found" },
-        }));
-
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
-        const eventBus = makeEventBus();
-        await executor.execute(makeContext(), eventBus);
-
-        const failedEvent = eventBus.events[1] as Record<string, unknown>;
-        const status = failedEvent.status as Record<string, unknown>;
-        expect(status.state).toBe("failed");
-        const msg = status.message as Record<string, unknown>;
-        const parts = msg.parts as Array<{ text: string }>;
-        expect(parts[0].text).toBe("Tool not found");
+            expect(eventBus.events.length).toBe(2);
+            const failedEvent = eventBus.events[1] as Record<string, unknown>;
+            expect(failedEvent.kind).toBe("status-update");
+            const status = failedEvent.status as Record<string, unknown>;
+            expect(status.state).toBe("failed");
+            const msg = status.message as Record<string, unknown>;
+            const parts = msg.parts as Array<{ text: string }>;
+            expect(parts[0].text).toBe("Connection refused");
+            expect(eventBus.finished).toHaveBeenCalledTimes(1);
+            expect(errorSpy).toHaveBeenCalled();
+        } finally {
+            errorSpy.mockRestore();
+        }
     });
 
     test("cancelTask aborts in-flight execution", async () => {
-        let resolveGateway!: (v: { ok: boolean }) => void;
-        const callGateway = mock(
-            () =>
-                new Promise<{ ok: boolean }>((r) => {
-                    resolveGateway = r;
-                }),
-        );
-
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
+        let resolveDispatch!: () => void;
+        const dispatchDone = new Promise<void>((resolve) => {
+            resolveDispatch = resolve;
+        });
+        const runtime = makeRuntime({
+            onDispatch: async () => {
+                await dispatchDone;
+            },
+        });
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
         const eventBus = makeEventBus();
 
         const executePromise = executor.execute(makeContext(), eventBus);
         await executor.cancelTask("task-1");
-        resolveGateway({ ok: true });
+        resolveDispatch();
         await executePromise;
 
-        // After abort, only the initial task event should be published (no completed/failed)
-        const kinds = eventBus.events.map((e) => (e as Record<string, unknown>).kind);
+        const kinds = eventBus.events.map((event) => (event as Record<string, unknown>).kind);
         expect(kinds).toContain("task");
         expect(kinds).not.toContain("status-update");
     });
 
-    test("generates contextId when not provided", async () => {
-        const callGateway = mock(async () => ({
-            ok: true as const,
-            data: { result: { payloads: [{ text: "OK" }] } },
-        }));
-
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
+    test("forwards an AbortSignal to the reply pipeline", async () => {
+        let capturedSignal: AbortSignal | undefined;
+        const runtime = makeRuntime({
+            onDispatch: async (params) => {
+                const replyOptions = params.replyOptions as
+                    | { abortSignal?: AbortSignal }
+                    | undefined;
+                capturedSignal = replyOptions?.abortSignal;
+                const dispatcherOptions = params.dispatcherOptions as {
+                    deliver?: (payload: { text?: string }) => Promise<void>;
+                };
+                await dispatcherOptions.deliver?.({ text: "ok" });
+            },
+        });
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
         const eventBus = makeEventBus();
-        const ctx = makeContext({ contextId: undefined });
-        await executor.execute(ctx, eventBus);
 
-        // contextId should be auto-generated (present on events)
-        const taskEvent = eventBus.events[0] as Record<string, string>;
-        expect(taskEvent.contextId).toBeTruthy();
+        const executePromise = executor.execute(makeContext(), eventBus);
+        await executor.cancelTask("task-1");
+        await executePromise;
+
+        expect(capturedSignal).toBeInstanceOf(AbortSignal);
+        expect(capturedSignal?.aborted).toBe(true);
     });
 
-    test("concatenates multiple text parts", async () => {
-        let capturedParams: Record<string, unknown> = {};
-        const callGateway = mock(async (params: { params?: Record<string, unknown> }) => {
-            capturedParams = params.params ?? {};
-            return {
-                ok: true as const,
-                data: { result: { payloads: [{ text: "OK" }] } },
-            };
+    test("generates contextId when not provided", async () => {
+        const runtime = makeRuntime();
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
         });
-
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
         const eventBus = makeEventBus();
-        const ctx = makeContext({
-            userMessage: {
-                role: "user",
-                messageId: crypto.randomUUID(),
-                parts: [
-                    { kind: "text", text: "Part 1" },
-                    { kind: "text", text: "Part 2" },
-                ],
-            } as Message,
-        });
-        await executor.execute(ctx, eventBus);
 
-        expect(capturedParams.message).toBe("Part 1\nPart 2");
+        await executor.execute(makeContext({ contextId: undefined }), eventBus);
+
+        const taskEvent = eventBus.events[0] as Record<string, string>;
+        expect(taskEvent.contextId).toBeTruthy();
+        expect(runtime.mocks.buildAgentSessionKey).toHaveBeenCalledTimes(1);
+    });
+
+    test("concatenates multiple text parts into the inbound body", async () => {
+        const runtime = makeRuntime();
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
+        const eventBus = makeEventBus();
+
+        await executor.execute(
+            makeContext({
+                userMessage: {
+                    role: "user",
+                    messageId: crypto.randomUUID(),
+                    parts: [
+                        { kind: "text", text: "Part 1" },
+                        { kind: "text", text: "Part 2" },
+                    ],
+                } as Message,
+            }),
+            eventBus,
+        );
+
+        const finalizedCtx = runtime.mocks.finalizeInboundContext.mock.calls[0]?.[0] as Record<
+            string,
+            unknown
+        >;
+        expect(finalizedCtx.Body).toBe("Part 1\nPart 2");
+        expect(finalizedCtx.BodyForAgent).toBe("Part 1\nPart 2");
     });
 
     test("includes data parts as XML tags", async () => {
-        let capturedParams: Record<string, unknown> = {};
-        const callGateway = mock(async (params: { params?: Record<string, unknown> }) => {
-            capturedParams = params.params ?? {};
-            return {
-                ok: true as const,
-                data: { result: { payloads: [{ text: "OK" }] } },
-            };
+        const runtime = makeRuntime();
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
         });
-
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
         const eventBus = makeEventBus();
-        const ctx = makeContext({
-            userMessage: {
-                role: "user",
-                messageId: crypto.randomUUID(),
-                parts: [
-                    { kind: "text", text: "Process this data" },
-                    { kind: "data", data: { key: "value" } },
-                ],
-            } as Message,
-        });
-        await executor.execute(ctx, eventBus);
 
-        const message = capturedParams.message as string;
-        expect(message).toContain("Process this data");
-        expect(message).toContain("<data>");
-        expect(message).toContain("<item>");
-        expect(message).toContain('"key": "value"');
-        expect(message).toContain("</item>");
-        expect(message).toContain("</data>");
+        await executor.execute(
+            makeContext({
+                userMessage: {
+                    role: "user",
+                    messageId: crypto.randomUUID(),
+                    parts: [
+                        { kind: "text", text: "Process this data" },
+                        { kind: "data", data: { key: "value" } },
+                    ],
+                } as Message,
+            }),
+            eventBus,
+        );
+
+        const finalizedCtx = runtime.mocks.finalizeInboundContext.mock.calls[0]?.[0] as Record<
+            string,
+            unknown
+        >;
+        const body = finalizedCtx.Body as string;
+        expect(body).toContain("Process this data");
+        expect(body).toContain("<data>");
+        expect(body).toContain("<item>");
+        expect(body).toContain('"key": "value"');
+        expect(body).toContain("</item>");
+        expect(body).toContain("</data>");
     });
 
-    test("includes mediaUrl as file parts in artifact", async () => {
-        const callGateway = mock(async () => ({
-            ok: true as const,
-            data: {
-                result: {
-                    payloads: [
-                        { text: "Here is an image", mediaUrl: "https://example.com/image.png" },
-                    ],
-                },
+    test("includes media URLs as file parts in the published artifact", async () => {
+        const runtime = makeRuntime({
+            onDispatch: async (params) => {
+                const dispatcherOptions = params.dispatcherOptions as {
+                    deliver?: (payload: {
+                        text?: string;
+                        mediaUrls?: string[];
+                        mediaUrl?: string;
+                    }) => Promise<void>;
+                };
+                await dispatcherOptions.deliver?.({
+                    text: "Here are files",
+                    mediaUrls: ["https://example.com/one.png", "https://example.com/two.png"],
+                });
             },
-        }));
-
-        const executor = new OpenClawExecutor({ agentId: "main", callGateway });
+        });
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
         const eventBus = makeEventBus();
+
         await executor.execute(makeContext(), eventBus);
 
         const artifactEvent = eventBus.events[1] as Record<string, unknown>;
         expect(artifactEvent.kind).toBe("artifact-update");
         const artifact = artifactEvent.artifact as Record<string, unknown>;
         const parts = artifact.parts as Array<Record<string, unknown>>;
-        expect(parts).toHaveLength(2);
+        expect(parts).toHaveLength(3);
         expect(parts[0].kind).toBe("text");
         expect(parts[1].kind).toBe("file");
-        const fileObj = parts[1].file as Record<string, unknown>;
-        expect(fileObj.uri).toBe("https://example.com/image.png");
+        expect(parts[2].kind).toBe("file");
+        expect((parts[1].file as Record<string, unknown>).uri).toBe("https://example.com/one.png");
+        expect((parts[2].file as Record<string, unknown>).uri).toBe("https://example.com/two.png");
     });
 
-    test("saves file parts via fileStore", async () => {
+    test("falls back to legacy mediaUrl when mediaUrls is absent", async () => {
+        const runtime = makeRuntime({
+            onDispatch: async (params) => {
+                const dispatcherOptions = params.dispatcherOptions as {
+                    deliver?: (payload: {
+                        text?: string;
+                        mediaUrls?: string[];
+                        mediaUrl?: string;
+                    }) => Promise<void>;
+                };
+                await dispatcherOptions.deliver?.({
+                    text: "Single legacy media",
+                    mediaUrl: "https://example.com/legacy.png",
+                });
+            },
+        });
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
+        const eventBus = makeEventBus();
+
+        await executor.execute(makeContext(), eventBus);
+
+        const artifactEvent = eventBus.events[1] as Record<string, unknown>;
+        const artifact = artifactEvent.artifact as Record<string, unknown>;
+        const parts = artifact.parts as Array<Record<string, unknown>>;
+        expect(parts).toHaveLength(2);
+        expect(parts[1].kind).toBe("file");
+        expect((parts[1].file as Record<string, unknown>).uri).toBe(
+            "https://example.com/legacy.png",
+        );
+    });
+
+    test("prefers mediaUrls and ignores legacy mediaUrl when both are present", async () => {
+        const runtime = makeRuntime({
+            onDispatch: async (params) => {
+                const dispatcherOptions = params.dispatcherOptions as {
+                    deliver?: (payload: {
+                        text?: string;
+                        mediaUrls?: string[];
+                        mediaUrl?: string;
+                    }) => Promise<void>;
+                };
+                await dispatcherOptions.deliver?.({
+                    mediaUrls: ["https://example.com/preferred.png"],
+                    mediaUrl: "https://example.com/preferred.png",
+                });
+            },
+        });
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
+        const eventBus = makeEventBus();
+
+        await executor.execute(makeContext(), eventBus);
+
+        const artifactEvent = eventBus.events[1] as Record<string, unknown>;
+        const artifact = artifactEvent.artifact as Record<string, unknown>;
+        const parts = artifact.parts as Array<Record<string, unknown>>;
+        // Only one file part — no duplicate from the legacy mediaUrl field.
+        expect(parts).toHaveLength(1);
+        expect(parts[0].kind).toBe("file");
+        expect((parts[0].file as Record<string, unknown>).uri).toBe(
+            "https://example.com/preferred.png",
+        );
+    });
+
+    test("saves file parts via fileStore and includes saved paths in the inbound body", async () => {
         const savedMessages: Message[] = [];
         const mockFileStore = {
-            saveMessage: mock(async (msg: Message) => {
-                savedMessages.push(msg);
+            saveMessage: mock(async (message: Message) => {
+                savedMessages.push(message);
                 return ["/tmp/saved/file.pdf"];
             }),
             getMessage: mock(async () => []),
@@ -262,47 +460,48 @@ describe("OpenClawExecutor", () => {
             getArtifact: mock(async () => []),
             deleteArtifact: mock(async () => {}),
         };
-
-        let capturedParams: Record<string, unknown> = {};
-        const callGateway = mock(async (params: { params?: Record<string, unknown> }) => {
-            capturedParams = params.params ?? {};
-            return {
-                ok: true as const,
-                data: { result: { payloads: [{ text: "OK" }] } },
-            };
-        });
-
+        const runtime = makeRuntime();
         const executor = new OpenClawExecutor({
             agentId: "main",
-            callGateway,
+            runtime: runtime.runtime as never,
+            config: {} as never,
             fileStore: mockFileStore,
+            workspaceDir: "/workspace",
         });
         const eventBus = makeEventBus();
-        const ctx = makeContext({
-            userMessage: {
-                role: "user",
-                messageId: "msg-123",
-                parts: [
-                    { kind: "text", text: "Here is a file" },
-                    {
-                        kind: "file",
-                        file: {
-                            name: "file.pdf",
-                            mimeType: "application/pdf",
-                            bytes: Buffer.from("content").toString("base64"),
-                        },
-                    },
-                ],
-            } as Message,
-        });
-        await executor.execute(ctx, eventBus);
 
+        await executor.execute(
+            makeContext({
+                userMessage: {
+                    role: "user",
+                    messageId: "msg-123",
+                    parts: [
+                        { kind: "text", text: "Here is a file" },
+                        {
+                            kind: "file",
+                            file: {
+                                name: "file.pdf",
+                                mimeType: "application/pdf",
+                                bytes: Buffer.from("content").toString("base64"),
+                            },
+                        },
+                    ],
+                } as Message,
+            }),
+            eventBus,
+        );
+
+        expect(savedMessages).toHaveLength(1);
         expect(mockFileStore.saveMessage).toHaveBeenCalledTimes(1);
-        const message = capturedParams.message as string;
-        expect(message).toContain("Here is a file");
-        expect(message).toContain("<files>");
-        expect(message).toContain("<file>");
-        expect(message).toContain("/tmp/saved/file.pdf");
-        expect(message).toContain("</files>");
+        const finalizedCtx = runtime.mocks.finalizeInboundContext.mock.calls[0]?.[0] as Record<
+            string,
+            unknown
+        >;
+        const body = finalizedCtx.Body as string;
+        expect(body).toContain("Here is a file");
+        expect(body).toContain("<files>");
+        expect(body).toContain("<file>");
+        expect(body).toContain("/tmp/saved/file.pdf");
+        expect(body).toContain("</files>");
     });
 });

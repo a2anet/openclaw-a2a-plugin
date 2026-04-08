@@ -106,8 +106,7 @@
                                 "key": { "type": "string" }
                             }
                         }
-                    },
-                    "gatewayTimeout": { "type": "number" }
+                    }
                 }
             }
         }

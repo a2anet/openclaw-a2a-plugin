@@ -43,7 +43,6 @@ export type A2AInboundConfig = {
     agentCard?: A2AAgentCardConfig;
     allowUnauthenticated?: boolean;
     apiKeys?: A2AInboundKey[];
-    gatewayTimeout?: number;
 };
 
 export type A2APluginConfig = {
@@ -221,21 +220,14 @@ function parseInbound(value: unknown): A2AInboundConfig | undefined {
     const allowUnauthenticated =
         typeof raw.allowUnauthenticated === "boolean" ? raw.allowUnauthenticated : undefined;
     const apiKeys = parseApiKeys(raw.apiKeys);
-    const gatewayTimeout = parsePositiveNumber(raw.gatewayTimeout);
 
-    if (
-        agentCard === undefined &&
-        allowUnauthenticated === undefined &&
-        apiKeys === undefined &&
-        gatewayTimeout === undefined
-    ) {
+    if (agentCard === undefined && allowUnauthenticated === undefined && apiKeys === undefined) {
         return undefined;
     }
     return {
         ...(agentCard ? { agentCard } : {}),
         ...(allowUnauthenticated !== undefined ? { allowUnauthenticated } : {}),
         ...(apiKeys ? { apiKeys } : {}),
-        ...(gatewayTimeout !== undefined ? { gatewayTimeout } : {}),
     };
 }
 
