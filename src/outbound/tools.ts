@@ -5,6 +5,7 @@
 import {
     A2AAgents,
     A2ASession,
+    type A2AToolDefinition,
     A2ATools,
     ArtifactSettings,
     JSONTaskStore,
@@ -68,7 +69,7 @@ export function createOutboundTools(params: CreateOutboundToolsParams): AgentToo
 
     const tools = new A2ATools(session, { artifactSettings });
 
-    return tools.toolDefinitions.map((def) => {
+    return (tools.tools as A2AToolDefinition[]).map((def) => {
         const { $schema: _, ...jsonSchema } = zodToJsonSchema(def.schema, { target: "openAi" });
         return {
             name: `a2a_${def.name}`,

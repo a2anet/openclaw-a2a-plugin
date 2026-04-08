@@ -12,6 +12,6 @@ Add high-level coding guidelines and review notes to this file. Specific actiona
 
 ## Engineering Guidelines
 
-- Keep shared A2A protocol helpers in utility-style modules when they are used across inbound and outbound flows.
-- Preserve the current Bun, Biome, TypeScript, and Release Please workflow when making template-level repo changes.
+- Constants and utility functions should be kept in a constants or utility file if used by more than one class. Otherwise they should be in the class.
+- Do not write defensive compatibility code for outdated dependency APIs. When a package changes shape, update this plugin to the current upstream API instead of carrying shims for older versions.
 - Keep `README.md` and source comments focused on the current codebase. Do not leave behind notes about previous implementations, migrations, or removed workarounds unless that historical context is still directly relevant to understanding the current behavior.
