@@ -326,7 +326,7 @@ export class OpenClawExecutor implements AgentExecutor {
                 taskId,
                 contextId: effectiveContextId,
                 artifact: {
-                    artifactId: "response",
+                    artifactId: crypto.randomUUID(),
                     parts: artifactParts,
                 },
             } satisfies TaskArtifactUpdateEvent;
