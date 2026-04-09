@@ -1,5 +1,7 @@
 # OpenClaw A2A Plugin
 
+![OpenClaw A2A Plugin](images/openclaw-a2a-plugin-banner.png)
+
 [![npm version](https://img.shields.io/npm/v/@a2anet/openclaw-a2a-plugin.svg)](https://www.npmjs.com/package/@a2anet/openclaw-a2a-plugin) [![License](https://img.shields.io/github/license/a2anet/openclaw-a2a-plugin)](https://github.com/a2anet/openclaw-a2a-plugin/blob/main/LICENSE) [![A2A Protocol](https://img.shields.io/badge/A2A-Protocol-blue)](https://a2a-protocol.org) [![Discord](https://img.shields.io/discord/1391916121589944320?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/674NGXpAjU)
 
 [OpenClaw](https://openclaw.ai) [A2A protocol](https://a2a-project.org/) community plugin.
