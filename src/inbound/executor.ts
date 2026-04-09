@@ -17,8 +17,24 @@ import { type FileStore, LocalFileStore } from "@a2anet/a2a-utils";
 import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
 import { dispatchInboundReplyWithBase } from "openclaw/plugin-sdk/inbound-reply-dispatch";
 import { resolveOutboundMediaUrls } from "openclaw/plugin-sdk/reply-payload";
+import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 
 const CHANNEL_ID = "a2a";
+const ANONYMOUS_SENDER_LABEL = "anonymous";
+const DEFAULT_CLIENT_ERROR_MESSAGE = "Something went wrong.";
+
+type TaskExecutionState = {
+    controller: AbortController;
+    eventBus: ExecutionEventBus;
+    contextId: string;
+};
+
+class AttachedFileRetrievalError extends Error {
+    constructor(cause: unknown) {
+        super("Attached file retrieval failed", { cause });
+        this.name = "AttachedFileRetrievalError";
+    }
+}
 
 export type OpenClawExecutorParams = {
     agentId: string;
@@ -32,11 +48,56 @@ export type OpenClawExecutorParams = {
  * Bridges inbound A2A protocol requests into OpenClaw's shared auto-reply pipeline.
  */
 export class OpenClawExecutor implements AgentExecutor {
-    private abortControllers = new Map<string, AbortController>();
+    private taskExecutions = new Map<string, TaskExecutionState>();
     private agentId: string;
     private runtime: PluginRuntime;
     private config: OpenClawConfig;
     private fileStore: FileStore | null;
+
+    private static isAbortLikeError(err: unknown): boolean {
+        if (!(err instanceof Error)) {
+            return false;
+        }
+        if (err.name === "AbortError") {
+            return true;
+        }
+        const message = err.message.toLowerCase();
+        return (
+            message.includes("aborted") ||
+            message.includes("canceled") ||
+            message.includes("cancelled")
+        );
+    }
+
+    private static isTimeoutLikeError(err: unknown): boolean {
+        if (!(err instanceof Error)) {
+            return false;
+        }
+        if (err.name === "TimeoutError") {
+            return true;
+        }
+        const message = err.message.toLowerCase();
+        return message.includes("timed out") || message.includes("timeout");
+    }
+
+    private static toClientErrorMessage(err: unknown): string {
+        if (err instanceof AttachedFileRetrievalError) {
+            if (OpenClawExecutor.isAbortLikeError(err.cause)) {
+                return "The request was canceled.";
+            }
+            if (OpenClawExecutor.isTimeoutLikeError(err.cause)) {
+                return "The request timed out.";
+            }
+            return "The attached file could not be retrieved.";
+        }
+        if (OpenClawExecutor.isAbortLikeError(err)) {
+            return "The request was canceled.";
+        }
+        if (OpenClawExecutor.isTimeoutLikeError(err)) {
+            return "The request timed out.";
+        }
+        return DEFAULT_CLIENT_ERROR_MESSAGE;
+    }
 
     constructor(params: OpenClawExecutorParams) {
         this.agentId = params.agentId;
@@ -49,14 +110,51 @@ export class OpenClawExecutor implements AgentExecutor {
                   new LocalFileStore(path.join(params.workspaceDir, "a2a", "inbound", "files")));
     }
 
-    execute = async (
+    private publishFinalStatusUpdate(params: {
+        eventBus: ExecutionEventBus;
+        taskId: string;
+        contextId: string;
+        state: "completed" | "failed" | "canceled";
+        message?: string;
+    }) {
+        const { eventBus, taskId, contextId, state, message } = params;
+        const status = {
+            state,
+            timestamp: new Date().toISOString(),
+            ...(message
+                ? {
+                      message: {
+                          kind: "message" as const,
+                          messageId: crypto.randomUUID(),
+                          role: "agent" as const,
+                          parts: [{ kind: "text" as const, text: message }],
+                      },
+                  }
+                : {}),
+        };
+
+        eventBus.publish({
+            kind: "status-update" as const,
+            taskId,
+            contextId,
+            status,
+            final: true,
+        } satisfies TaskStatusUpdateEvent);
+    }
+
+    async execute(
         requestContext: RequestContext,
         eventBus: ExecutionEventBus,
-    ): Promise<void> => {
+    ): Promise<void> {
         const { taskId, userMessage } = requestContext;
         const effectiveContextId = requestContext.contextId ?? crypto.randomUUID();
+        const senderLabel = requestContext.context?.user?.userName ?? ANONYMOUS_SENDER_LABEL;
         const abortController = new AbortController();
-        this.abortControllers.set(taskId, abortController);
+        this.taskExecutions.set(taskId, {
+            controller: abortController,
+            eventBus,
+            contextId: effectiveContextId,
+        });
 
         const textSegments = userMessage.parts
             .filter((p: { kind: string }): p is TextPart => p.kind === "text")
@@ -65,32 +163,13 @@ export class OpenClawExecutor implements AgentExecutor {
         const dataParts = userMessage.parts.filter(
             (p: { kind: string }): p is DataPart => p.kind === "data",
         );
-
-        let savedFilePaths: string[] = [];
         const hasFiles = userMessage.parts.some((p) => p.kind === "file");
-        if (this.fileStore && hasFiles) {
-            savedFilePaths = await this.fileStore.saveMessage(userMessage);
-        }
-
-        let gatewayText = textSegments.join("\n");
-
-        if (dataParts.length > 0) {
-            gatewayText += "\n\n<data>\n";
-            for (const part of dataParts) {
-                gatewayText += `<item>\n${JSON.stringify(part.data, null, 2)}\n</item>\n`;
-            }
-            gatewayText += "</data>";
-        }
-
-        if (savedFilePaths.length > 0) {
-            gatewayText += "\n\n<files>\n";
-            for (const filePath of savedFilePaths) {
-                gatewayText += `<file>${filePath}</file>\n`;
-            }
-            gatewayText += "</files>";
-        }
-
-        if (!gatewayText.trim()) {
+        const hasUsableFileContext = hasFiles && this.fileStore !== null;
+        if (
+            textSegments.join("\n").trim().length === 0 &&
+            dataParts.length === 0 &&
+            !hasUsableFileContext
+        ) {
             const errorMessage = {
                 kind: "message" as const,
                 messageId: crypto.randomUUID(),
@@ -100,16 +179,11 @@ export class OpenClawExecutor implements AgentExecutor {
             } satisfies Message;
             eventBus.publish(errorMessage);
             eventBus.finished();
-            this.abortControllers.delete(taskId);
+            this.taskExecutions.delete(taskId);
             return;
         }
 
         try {
-            const sessionKey = this.runtime.channel.routing.buildAgentSessionKey({
-                agentId: this.agentId,
-                channel: CHANNEL_ID,
-                peer: { kind: "direct", id: effectiveContextId },
-            });
             const initialTask = {
                 kind: "task" as const,
                 id: taskId,
@@ -122,21 +196,62 @@ export class OpenClawExecutor implements AgentExecutor {
             } satisfies Task;
             eventBus.publish(initialTask);
 
+            let gatewayText = textSegments.join("\n");
+
+            if (dataParts.length > 0) {
+                gatewayText += "\n\n<data>\n";
+                for (const part of dataParts) {
+                    gatewayText += `<item>\n${JSON.stringify(part.data, null, 2)}\n</item>\n`;
+                }
+                gatewayText += "</data>";
+            }
+
+            let savedFilePaths: string[] = [];
+            if (this.fileStore && hasFiles) {
+                try {
+                    savedFilePaths = await this.fileStore.saveMessage(userMessage);
+                } catch (err) {
+                    throw new AttachedFileRetrievalError(err);
+                }
+            }
+
+            if (savedFilePaths.length > 0) {
+                gatewayText += "\n\n<files>\n";
+                for (const filePath of savedFilePaths) {
+                    gatewayText += `<file>${filePath}</file>\n`;
+                }
+                gatewayText += "</files>";
+            }
+
+            const baseSessionKey = this.runtime.channel.routing.buildAgentSessionKey({
+                agentId: this.agentId,
+                channel: CHANNEL_ID,
+                peer: { kind: "direct", id: senderLabel },
+                dmScope: "per-peer",
+            });
+            const { sessionKey, parentSessionKey } = resolveThreadSessionKeys({
+                baseSessionKey,
+                threadId: effectiveContextId,
+                parentSessionKey: baseSessionKey,
+            });
+
             const finalizedCtx = this.runtime.channel.reply.finalizeInboundContext({
                 Body: gatewayText,
                 BodyForAgent: gatewayText,
                 RawBody: gatewayText,
                 CommandBody: gatewayText,
                 BodyForCommands: gatewayText,
-                From: `a2a:${effectiveContextId}`,
+                From: `a2a:${senderLabel}`,
                 To: `a2a:${this.agentId}`,
                 SessionKey: sessionKey,
-                SenderId: `a2a:${effectiveContextId}`,
-                SenderName: "Remote A2A Agent",
+                SenderId: `a2a:${senderLabel}`,
+                SenderName: senderLabel,
                 Provider: CHANNEL_ID,
                 Surface: CHANNEL_ID,
                 ChatType: "direct",
                 ConversationLabel: effectiveContextId,
+                MessageThreadId: effectiveContextId,
+                ParentSessionKey: parentSessionKey,
                 InputProvenance: { kind: "external_user", sourceChannel: CHANNEL_ID },
                 ForceSenderIsOwnerFalse: true,
                 Timestamp: Date.now(),
@@ -198,7 +313,15 @@ export class OpenClawExecutor implements AgentExecutor {
             }
 
             if (artifactParts.length === 0) {
-                artifactParts.push({ kind: "text" as const, text: "No response" });
+                this.publishFinalStatusUpdate({
+                    eventBus,
+                    taskId,
+                    contextId: effectiveContextId,
+                    state: "failed",
+                    message: DEFAULT_CLIENT_ERROR_MESSAGE,
+                });
+                eventBus.finished();
+                return;
             }
 
             const artifactUpdate = {
@@ -211,53 +334,48 @@ export class OpenClawExecutor implements AgentExecutor {
                 },
             } satisfies TaskArtifactUpdateEvent;
             eventBus.publish(artifactUpdate);
-
-            const completedStatus = {
-                kind: "status-update" as const,
+            this.publishFinalStatusUpdate({
+                eventBus,
                 taskId,
                 contextId: effectiveContextId,
-                status: {
-                    state: "completed" as const,
-                    timestamp: new Date().toISOString(),
-                },
-                final: true,
-            } satisfies TaskStatusUpdateEvent;
-            eventBus.publish(completedStatus);
+                state: "completed",
+            });
             eventBus.finished();
         } catch (err) {
             if (abortController.signal.aborted) {
                 return;
             }
-            const errorText = err instanceof Error ? err.message : String(err);
-
-            const failedStatus = {
-                kind: "status-update" as const,
+            console.error(`[a2a] task ${taskId} failed`, err);
+            this.publishFinalStatusUpdate({
+                eventBus,
                 taskId,
                 contextId: effectiveContextId,
-                status: {
-                    state: "failed" as const,
-                    timestamp: new Date().toISOString(),
-                    message: {
-                        kind: "message" as const,
-                        messageId: crypto.randomUUID(),
-                        role: "agent" as const,
-                        parts: [{ kind: "text" as const, text: errorText }],
-                    },
-                },
-                final: true,
-            } satisfies TaskStatusUpdateEvent;
-            eventBus.publish(failedStatus);
+                state: "failed",
+                message: OpenClawExecutor.toClientErrorMessage(err),
+            });
             eventBus.finished();
         } finally {
-            this.abortControllers.delete(taskId);
+            this.taskExecutions.delete(taskId);
         }
-    };
+    }
 
-    cancelTask = async (taskId: string): Promise<void> => {
-        const controller = this.abortControllers.get(taskId);
-        if (controller) {
-            controller.abort();
-            this.abortControllers.delete(taskId);
+    async cancelTask(taskId: string, eventBus?: ExecutionEventBus): Promise<void> {
+        const executionState = this.taskExecutions.get(taskId);
+        if (!executionState) {
+            return;
         }
-    };
+
+        executionState.controller.abort();
+
+        const targetEventBus = executionState.eventBus ?? eventBus;
+        this.publishFinalStatusUpdate({
+            eventBus: targetEventBus,
+            taskId,
+            contextId: executionState.contextId,
+            state: "canceled",
+            message: "The request was canceled.",
+        });
+        targetEventBus.finished();
+        this.taskExecutions.delete(taskId);
+    }
 }

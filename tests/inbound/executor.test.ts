@@ -38,13 +38,26 @@ function makeEventBus() {
 
 function makeRuntime(options?: {
     onDispatch?: (params: Record<string, unknown>) => Promise<void>;
-    sessionKey?: string;
+    buildBaseSessionKey?: (params: {
+        agentId: string;
+        channel: string;
+        peer: { kind: string; id: string };
+        dmScope?: string;
+    }) => string;
     storePath?: string;
 }) {
-    const sessionKey = options?.sessionKey ?? "agent:main:a2a:direct:ctx-1";
     const storePath = options?.storePath ?? "/tmp/sessions.json";
 
-    const buildAgentSessionKey = mock(() => sessionKey);
+    const buildAgentSessionKey = mock(
+        (params: {
+            agentId: string;
+            channel: string;
+            peer: { kind: string; id: string };
+            dmScope?: string;
+        }) =>
+            options?.buildBaseSessionKey?.(params) ??
+            `agent:${params.agentId}:${params.channel}:${params.peer.kind}:${params.peer.id}`,
+    );
     const finalizeInboundContext = mock((ctx: Record<string, unknown>) => ctx);
     const recordInboundSession = mock(async () => undefined);
     const resolveStorePath = mock(() => storePath);
@@ -111,7 +124,8 @@ describe("OpenClawExecutor", () => {
         expect(runtime.mocks.buildAgentSessionKey).toHaveBeenCalledWith({
             agentId: "main",
             channel: "a2a",
-            peer: { kind: "direct", id: "ctx-1" },
+            peer: { kind: "direct", id: "anonymous" },
+            dmScope: "per-peer",
         });
         expect(runtime.mocks.recordInboundSession).toHaveBeenCalledTimes(1);
         const recordArgs = runtime.mocks.recordInboundSession.mock.calls[0]?.[0] as Record<
@@ -119,13 +133,19 @@ describe("OpenClawExecutor", () => {
             unknown
         >;
         expect(recordArgs.storePath).toBe("/tmp/sessions.json");
-        expect(recordArgs.sessionKey).toBe("agent:main:a2a:direct:ctx-1");
+        expect(recordArgs.sessionKey).toBe("agent:main:a2a:direct:anonymous:thread:ctx-1");
         expect(recordArgs.ctx).toMatchObject({
             ForceSenderIsOwnerFalse: true,
             CommandAuthorized: false,
             InputProvenance: { kind: "external_user", sourceChannel: "a2a" },
             Provider: "a2a",
             Surface: "a2a",
+            From: "a2a:anonymous",
+            SenderId: "a2a:anonymous",
+            SenderName: "anonymous",
+            ConversationLabel: "ctx-1",
+            MessageThreadId: "ctx-1",
+            ParentSessionKey: "agent:main:a2a:direct:anonymous",
         });
     });
 
@@ -152,6 +172,46 @@ describe("OpenClawExecutor", () => {
         expect((eventBus.events[0] as Record<string, unknown>).kind).toBe("message");
         expect(runtime.mocks.buildAgentSessionKey).not.toHaveBeenCalled();
         expect(eventBus.finished).toHaveBeenCalledTimes(1);
+    });
+
+    test("namespaces sessions and sender identity by authenticated sender label", async () => {
+        const runtime = makeRuntime();
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
+        const eventBus = makeEventBus();
+
+        await executor.execute(
+            makeContext({
+                context: {
+                    user: {
+                        userName: "alice",
+                    },
+                } as RequestContext["context"],
+            }),
+            eventBus,
+        );
+
+        expect(runtime.mocks.buildAgentSessionKey).toHaveBeenCalledWith({
+            agentId: "main",
+            channel: "a2a",
+            peer: { kind: "direct", id: "alice" },
+            dmScope: "per-peer",
+        });
+        const finalizedCtx = runtime.mocks.finalizeInboundContext.mock.calls[0]?.[0] as Record<
+            string,
+            unknown
+        >;
+        expect(finalizedCtx.From).toBe("a2a:alice");
+        expect(finalizedCtx.SenderId).toBe("a2a:alice");
+        expect(finalizedCtx.SenderName).toBe("alice");
+        expect(finalizedCtx.ConversationLabel).toBe("ctx-1");
+        expect(finalizedCtx.MessageThreadId).toBe("ctx-1");
+        expect(finalizedCtx.ParentSessionKey).toBe("agent:main:a2a:direct:alice");
+        expect(finalizedCtx.SessionKey).toBe("agent:main:a2a:direct:alice:thread:ctx-1");
     });
 
     test("publishes failed status when dispatch reports an error", async () => {
@@ -184,8 +244,112 @@ describe("OpenClawExecutor", () => {
             expect(status.state).toBe("failed");
             const msg = status.message as Record<string, unknown>;
             const parts = msg.parts as Array<{ text: string }>;
-            expect(parts[0].text).toBe("Connection refused");
+            expect(parts[0].text).toBe("Something went wrong.");
             expect(eventBus.finished).toHaveBeenCalledTimes(1);
+            expect(errorSpy).toHaveBeenCalled();
+        } finally {
+            errorSpy.mockRestore();
+        }
+    });
+
+    test("maps timeout-like failures to a safe client message", async () => {
+        const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const runtime = makeRuntime({
+                onDispatch: async (params) => {
+                    const dispatcherOptions = params.dispatcherOptions as {
+                        onError?: (err: unknown, info: { kind: string }) => void;
+                    };
+                    dispatcherOptions.onError?.(new Error("Upstream request timed out"), {
+                        kind: "final",
+                    });
+                },
+            });
+            const executor = new OpenClawExecutor({
+                agentId: "main",
+                runtime: runtime.runtime as never,
+                config: {} as never,
+                workspaceDir: "/workspace",
+            });
+            const eventBus = makeEventBus();
+
+            await executor.execute(makeContext(), eventBus);
+
+            const failedEvent = eventBus.events[1] as Record<string, unknown>;
+            const message = (
+                (failedEvent.status as Record<string, unknown>).message as Record<string, unknown>
+            ).parts as Array<{ text: string }>;
+            expect(message[0].text).toBe("The request timed out.");
+            expect(errorSpy).toHaveBeenCalled();
+        } finally {
+            errorSpy.mockRestore();
+        }
+    });
+
+    test("treats empty agent output as a failed status without artifacts", async () => {
+        const runtime = makeRuntime({
+            onDispatch: async () => undefined,
+        });
+        const executor = new OpenClawExecutor({
+            agentId: "main",
+            runtime: runtime.runtime as never,
+            config: {} as never,
+            workspaceDir: "/workspace",
+        });
+        const eventBus = makeEventBus();
+
+        await executor.execute(makeContext(), eventBus);
+
+        expect(eventBus.events).toHaveLength(2);
+        expect((eventBus.events[0] as Record<string, unknown>).kind).toBe("task");
+        const failedEvent = eventBus.events[1] as Record<string, unknown>;
+        expect(failedEvent.kind).toBe("status-update");
+        expect((failedEvent.status as Record<string, unknown>).state).toBe("failed");
+        const message = (
+            (failedEvent.status as Record<string, unknown>).message as Record<string, unknown>
+        ).parts as Array<{ text: string }>;
+        expect(message[0].text).toBe("Something went wrong.");
+    });
+
+    test("sanitizes attached file retrieval failures", async () => {
+        const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const runtime = makeRuntime();
+            const executor = new OpenClawExecutor({
+                agentId: "main",
+                runtime: runtime.runtime as never,
+                config: {} as never,
+                fileStore: {
+                    saveMessage: mock(async () => {
+                        throw new Error("HTTP 403: Forbidden");
+                    }),
+                    getMessage: mock(async () => []),
+                    deleteMessage: mock(async () => {}),
+                    saveArtifact: mock(async () => []),
+                    getArtifact: mock(async () => []),
+                    deleteArtifact: mock(async () => {}),
+                },
+                workspaceDir: "/workspace",
+            });
+            const eventBus = makeEventBus();
+
+            await executor.execute(
+                makeContext({
+                    userMessage: {
+                        role: "user",
+                        messageId: "msg-123",
+                        parts: [{ kind: "file", file: { uri: "https://example.com/file.pdf" } }],
+                    } as Message,
+                }),
+                eventBus,
+            );
+
+            expect(eventBus.events).toHaveLength(2);
+            const failedEvent = eventBus.events[1] as Record<string, unknown>;
+            const message = (
+                (failedEvent.status as Record<string, unknown>).message as Record<string, unknown>
+            ).parts as Array<{ text: string }>;
+            expect(message[0].text).toBe("The attached file could not be retrieved.");
             expect(errorSpy).toHaveBeenCalled();
         } finally {
             errorSpy.mockRestore();
@@ -217,7 +381,14 @@ describe("OpenClawExecutor", () => {
 
         const kinds = eventBus.events.map((event) => (event as Record<string, unknown>).kind);
         expect(kinds).toContain("task");
-        expect(kinds).not.toContain("status-update");
+        expect(kinds).toContain("status-update");
+        const canceledEvent = eventBus.events[1] as Record<string, unknown>;
+        expect((canceledEvent.status as Record<string, unknown>).state).toBe("canceled");
+        const message = (
+            (canceledEvent.status as Record<string, unknown>).message as Record<string, unknown>
+        ).parts as Array<{ text: string }>;
+        expect(message[0].text).toBe("The request was canceled.");
+        expect(eventBus.finished).toHaveBeenCalledTimes(1);
     });
 
     test("forwards an AbortSignal to the reply pipeline", async () => {

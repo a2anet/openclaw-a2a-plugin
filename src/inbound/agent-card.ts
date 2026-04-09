@@ -5,43 +5,7 @@
 import type { AgentCard, AgentSkill } from "@a2a-js/sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
-import type { A2APluginConfig, A2ASkillConfig } from "../config.js";
-
-/**
- * Resolve the agent name from OpenClaw config.
- * Navigates `config.agents.list[].identity.name` or `config.agents.list[].name`.
- */
-function resolveAgentName(openclawConfig: OpenClawConfig, agentId: string): string | undefined {
-    const agents = openclawConfig.agents?.list;
-    if (!Array.isArray(agents)) {
-        return undefined;
-    }
-    const entry = agents.find((a) => a.id?.toLowerCase() === agentId.toLowerCase());
-    if (!entry) {
-        return undefined;
-    }
-    const identityName = entry.identity?.name;
-    return typeof identityName === "string"
-        ? identityName
-        : typeof entry.name === "string"
-          ? entry.name
-          : undefined;
-}
-
-function buildSkills(skills?: A2ASkillConfig[]): AgentSkill[] {
-    if (!skills || skills.length === 0) {
-        return [];
-    }
-    return skills.map((s) => ({
-        id: s.id,
-        name: s.name,
-        description: s.description,
-        tags: s.tags ?? [],
-        ...(s.examples ? { examples: s.examples } : {}),
-        inputModes: s.inputModes ?? ["text"],
-        outputModes: s.outputModes ?? ["text"],
-    }));
-}
+import type { A2AAgentCardConfig, A2APluginConfig, A2ASkillConfig } from "../config.js";
 
 export type BuildAgentCardParams = {
     openclawConfig: OpenClawConfig;
@@ -51,40 +15,82 @@ export type BuildAgentCardParams = {
     agentId?: string;
 };
 
-/**
- * Build an A2A Agent Card from OpenClaw's agent identity and plugin config.
- */
-export function buildAgentCard(params: BuildAgentCardParams): AgentCard {
-    const { openclawConfig, pluginConfig, publicUrl, authRequired } = params;
-    const agentId = params.agentId ?? "main";
+export class AgentCardBuilder {
+    private readonly agentId: string;
+    private readonly agentCardConfig?: A2AAgentCardConfig;
 
-    const agentCardConfig = pluginConfig.inbound?.agentCard;
-    const agentName = resolveAgentName(openclawConfig, agentId);
-    const name = agentCardConfig?.name ?? agentName ?? `OpenClaw Agent (${agentId})`;
-    const description = agentCardConfig?.description ?? "AI assistant powered by OpenClaw";
-    const baseUrl = publicUrl.replace(/\/$/, "");
-
-    const card: AgentCard = {
-        name,
-        description,
-        protocolVersion: "0.3.0",
-        version: "1.0.0",
-        url: `${baseUrl}/a2a`,
-        capabilities: {
-            streaming: true,
-            pushNotifications: false,
-        },
-        defaultInputModes: ["text"],
-        defaultOutputModes: ["text"],
-        skills: buildSkills(agentCardConfig?.skills),
-    };
-
-    if (authRequired) {
-        card.securitySchemes = {
-            a2aApiKey: { type: "apiKey", name: "Authorization", in: "header" },
-        };
-        card.security = [{ a2aApiKey: [] }];
+    constructor(private readonly params: BuildAgentCardParams) {
+        this.agentId = params.agentId ?? "main";
+        this.agentCardConfig = params.pluginConfig.inbound?.agentCard;
     }
 
-    return card;
+    build(): AgentCard {
+        const name =
+            this.agentCardConfig?.name ??
+            this.resolveAgentName() ??
+            `OpenClaw Agent (${this.agentId})`;
+        const description =
+            this.agentCardConfig?.description ?? "AI assistant powered by OpenClaw";
+        const baseUrl = this.params.publicUrl.replace(/\/$/, "");
+
+        const card: AgentCard = {
+            name,
+            description,
+            protocolVersion: "0.3.0",
+            version: "1.0.0",
+            url: `${baseUrl}/a2a`,
+            capabilities: {
+                streaming: true,
+                pushNotifications: false,
+            },
+            defaultInputModes: ["text"],
+            defaultOutputModes: ["text"],
+            skills: this.buildSkills(),
+        };
+
+        if (this.params.authRequired) {
+            card.securitySchemes = {
+                a2aApiKey: { type: "apiKey", name: "Authorization", in: "header" },
+            };
+            card.security = [{ a2aApiKey: [] }];
+        }
+
+        return card;
+    }
+
+    /**
+     * Resolve the agent name from OpenClaw config.
+     * Navigates `config.agents.list[].identity.name` or `config.agents.list[].name`.
+     */
+    private resolveAgentName(): string | undefined {
+        const agents = this.params.openclawConfig.agents?.list;
+        if (!Array.isArray(agents)) {
+            return undefined;
+        }
+        const entry = agents.find((a) => a.id?.toLowerCase() === this.agentId.toLowerCase());
+        if (!entry) {
+            return undefined;
+        }
+        const identityName = entry.identity?.name;
+        return typeof identityName === "string"
+            ? identityName
+            : typeof entry.name === "string"
+              ? entry.name
+              : undefined;
+    }
+
+    private buildSkills(): AgentSkill[] {
+        if (!this.agentCardConfig?.skills || this.agentCardConfig.skills.length === 0) {
+            return [];
+        }
+        return this.agentCardConfig.skills.map((skill: A2ASkillConfig) => ({
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            tags: skill.tags ?? [],
+            ...(skill.examples ? { examples: skill.examples } : {}),
+            inputModes: skill.inputModes ?? ["text"],
+            outputModes: skill.outputModes ?? ["text"],
+        }));
+    }
 }

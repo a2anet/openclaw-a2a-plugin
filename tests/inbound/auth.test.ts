@@ -53,6 +53,13 @@ describe("validateApiKey", () => {
         const result = validateApiKey(fakeReq("bearer abc123"), validKeys);
         expect(result).toEqual({ ok: true, label: "key1" });
     });
+
+    test("rejects matched keys whose configured label is invalid", () => {
+        const result = validateApiKey(fakeReq("Bearer abc123"), [
+            { label: "bad/label", key: "abc123" },
+        ]);
+        expect(result).toEqual({ ok: false, reason: "invalid_key" });
+    });
 });
 
 describe("sendAuthError", () => {

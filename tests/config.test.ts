@@ -4,6 +4,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { buildRootConfigWithA2A, parseA2APluginConfig } from "../src/config.js";
+import {
+    assertUniqueA2AInboundKeyLabels,
+    assertValidA2AInboundKeyLabel,
+    parseA2AInboundKeyLabel,
+} from "../src/utils/inbound-key-label.js";
 
 describe("parseA2APluginConfig", () => {
     test("returns empty config for undefined", () => {
@@ -175,10 +180,66 @@ describe("parseA2APluginConfig", () => {
                     { label: "good", key: "abc" },
                     { label: "", key: "bad" },
                     { label: "no-key", key: "" },
+                    { label: "bad label", key: "space" },
+                    { label: "bad/label", key: "slash" },
+                    { label: "bad:label", key: "colon" },
+                    { label: "a".repeat(65), key: "long" },
                 ],
             },
         });
         expect(result.inbound?.apiKeys).toEqual([{ label: "good", key: "abc" }]);
+    });
+
+    test("throws when inbound API key labels are duplicated", () => {
+        expect(() =>
+            parseA2APluginConfig({
+                inbound: {
+                    apiKeys: [
+                        { label: "alice", key: "abc" },
+                        { label: "alice", key: "def" },
+                    ],
+                },
+            }),
+        ).toThrow('Inbound API key labels must be unique: "alice"');
+    });
+
+    test("throws when inbound API key labels differ only by case", () => {
+        expect(() =>
+            parseA2APluginConfig({
+                inbound: {
+                    apiKeys: [
+                        { label: "Alice", key: "abc" },
+                        { label: "alice", key: "def" },
+                    ],
+                },
+            }),
+        ).toThrow('Inbound API key labels must be unique: "alice"');
+    });
+});
+
+describe("A2A inbound key label validation", () => {
+    test("accepts valid labels", () => {
+        expect(parseA2AInboundKeyLabel("Alpha-1._beta")).toBe("Alpha-1._beta");
+    });
+
+    test("rejects spaces, slashes, colons, empty labels, and overly long labels", () => {
+        expect(parseA2AInboundKeyLabel("bad label")).toBeUndefined();
+        expect(parseA2AInboundKeyLabel("bad/label")).toBeUndefined();
+        expect(parseA2AInboundKeyLabel("bad:label")).toBeUndefined();
+        expect(parseA2AInboundKeyLabel("   ")).toBeUndefined();
+        expect(parseA2AInboundKeyLabel("a".repeat(65))).toBeUndefined();
+    });
+
+    test("throws for invalid CLI labels", () => {
+        expect(() => assertValidA2AInboundKeyLabel("bad label")).toThrow(
+            "API key label must match ^[A-Za-z0-9._-]{1,64}$",
+        );
+    });
+
+    test("throws for duplicate labels", () => {
+        expect(() =>
+            assertUniqueA2AInboundKeyLabels([{ label: "alice" }, { label: "alice" }]),
+        ).toThrow('Inbound API key labels must be unique: "alice"');
     });
 });
 

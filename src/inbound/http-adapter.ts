@@ -4,75 +4,28 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentCard } from "@a2a-js/sdk";
-import type { A2ARequestHandler } from "@a2a-js/sdk/server";
-import { JsonRpcTransportHandler } from "@a2a-js/sdk/server";
+import type { A2ARequestHandler, User } from "@a2a-js/sdk/server";
+import { JsonRpcTransportHandler, ServerCallContext } from "@a2a-js/sdk/server";
 
 import type { A2AInboundKey } from "../config.js";
 import { sendAuthError, validateApiKey } from "./auth.js";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+const ANONYMOUS_SENDER_LABEL = "anonymous";
 
-async function readJsonBody(
-    req: IncomingMessage,
-): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
-    return new Promise((resolve) => {
-        const chunks: Buffer[] = [];
-        let size = 0;
-        let settled = false;
+class A2ARequestUser implements User {
+    constructor(
+        private readonly label: string,
+        private readonly authenticated: boolean,
+    ) {}
 
-        const done = (result: { ok: true; value: unknown } | { ok: false; error: string }) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            resolve(result);
-        };
+    get isAuthenticated(): boolean {
+        return this.authenticated;
+    }
 
-        req.on("data", (chunk: Buffer) => {
-            if (settled) {
-                return;
-            }
-            size += chunk.length;
-            if (size > MAX_BODY_BYTES) {
-                req.destroy();
-                done({ ok: false, error: "Request body too large" });
-                return;
-            }
-            chunks.push(chunk);
-        });
-
-        req.on("end", () => {
-            try {
-                const body = Buffer.concat(chunks).toString("utf8");
-                if (!body.trim()) {
-                    done({ ok: false, error: "Empty request body" });
-                    return;
-                }
-                done({ ok: true, value: JSON.parse(body) });
-            } catch {
-                done({ ok: false, error: "Invalid JSON body" });
-            }
-        });
-
-        req.on("error", (err) => {
-            done({ ok: false, error: err.message });
-        });
-    });
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown) {
-    res.statusCode = status;
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.end(JSON.stringify(body));
-}
-
-function setSseHeaders(res: ServerResponse) {
-    res.statusCode = 200;
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders?.();
+    get userName(): string {
+        return this.label;
+    }
 }
 
 export type A2AAuthConfig = {
@@ -87,18 +40,18 @@ export type A2AHttpHandlerParams = {
     auth?: A2AAuthConfig;
 };
 
-/**
- * Create HTTP handlers for A2A protocol endpoints.
- */
-export function createA2AHttpHandlers(params: A2AHttpHandlerParams) {
-    const { agentCard, getAgentCard, requestHandler, auth } = params;
-    const transportHandler = new JsonRpcTransportHandler(requestHandler);
+export class A2AHttpHandlers {
+    private readonly transportHandler: JsonRpcTransportHandler;
 
-    async function handleAgentCard(req: IncomingMessage, res: ServerResponse): Promise<void> {
-        sendJson(res, 200, getAgentCard?.(req) ?? agentCard);
+    constructor(private readonly params: A2AHttpHandlerParams) {
+        this.transportHandler = new JsonRpcTransportHandler(params.requestHandler);
     }
 
-    async function handleJsonRpc(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    async handleAgentCard(req: IncomingMessage, res: ServerResponse): Promise<void> {
+        this.sendJson(res, 200, this.params.getAgentCard?.(req) ?? this.params.agentCard);
+    }
+
+    async handleJsonRpc(req: IncomingMessage, res: ServerResponse): Promise<void> {
         if (req.method !== "POST") {
             res.setHeader("Allow", "POST");
             res.statusCode = 405;
@@ -106,17 +59,14 @@ export function createA2AHttpHandlers(params: A2AHttpHandlerParams) {
             return;
         }
 
-        if (auth?.required) {
-            const result = validateApiKey(req, auth.validKeys);
-            if (!result.ok) {
-                sendAuthError(res, "Authentication required");
-                return;
-            }
+        const senderLabel = this.resolveSenderLabel(req, res);
+        if (!senderLabel) {
+            return;
         }
 
-        const bodyResult = await readJsonBody(req);
+        const bodyResult = await this.readJsonBody(req);
         if (!bodyResult.ok) {
-            sendJson(res, 400, {
+            this.sendJson(res, 400, {
                 jsonrpc: "2.0",
                 id: null,
                 error: { code: -32700, message: bodyResult.error },
@@ -124,11 +74,18 @@ export function createA2AHttpHandlers(params: A2AHttpHandlerParams) {
             return;
         }
 
-        const rpcResponseOrStream = await transportHandler.handle(bodyResult.value);
+        const serverCallContext = new ServerCallContext(
+            undefined,
+            new A2ARequestUser(senderLabel, this.params.auth?.required === true),
+        );
+        const rpcResponseOrStream = await this.transportHandler.handle(
+            bodyResult.value,
+            serverCallContext,
+        );
 
         if (typeof (rpcResponseOrStream as AsyncGenerator)?.[Symbol.asyncIterator] === "function") {
             const stream = rpcResponseOrStream as AsyncGenerator<unknown, void, undefined>;
-            setSseHeaders(res);
+            this.setSseHeaders(res);
             try {
                 for await (const event of stream) {
                     res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -140,10 +97,86 @@ export function createA2AHttpHandlers(params: A2AHttpHandlerParams) {
                     res.end();
                 }
             }
-        } else {
-            sendJson(res, 200, rpcResponseOrStream);
+            return;
         }
+
+        this.sendJson(res, 200, rpcResponseOrStream);
     }
 
-    return { handleAgentCard, handleJsonRpc };
+    private resolveSenderLabel(req: IncomingMessage, res: ServerResponse): string | null {
+        if (!this.params.auth?.required) {
+            return ANONYMOUS_SENDER_LABEL;
+        }
+
+        const result = validateApiKey(req, this.params.auth.validKeys);
+        if (!result.ok) {
+            sendAuthError(res, "Authentication required");
+            return null;
+        }
+
+        return result.label;
+    }
+
+    private async readJsonBody(
+        req: IncomingMessage,
+    ): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
+        return new Promise((resolve) => {
+            const chunks: Buffer[] = [];
+            let size = 0;
+            let settled = false;
+
+            const done = (result: { ok: true; value: unknown } | { ok: false; error: string }) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                resolve(result);
+            };
+
+            req.on("data", (chunk: Buffer) => {
+                if (settled) {
+                    return;
+                }
+                size += chunk.length;
+                if (size > MAX_BODY_BYTES) {
+                    req.destroy();
+                    done({ ok: false, error: "Request body too large" });
+                    return;
+                }
+                chunks.push(chunk);
+            });
+
+            req.on("end", () => {
+                try {
+                    const body = Buffer.concat(chunks).toString("utf8");
+                    if (!body.trim()) {
+                        done({ ok: false, error: "Empty request body" });
+                        return;
+                    }
+                    done({ ok: true, value: JSON.parse(body) });
+                } catch {
+                    done({ ok: false, error: "Invalid JSON body" });
+                }
+            });
+
+            req.on("error", (err) => {
+                done({ ok: false, error: err.message });
+            });
+        });
+    }
+
+    private sendJson(res: ServerResponse, status: number, body: unknown): void {
+        res.statusCode = status;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify(body));
+    }
+
+    private setSseHeaders(res: ServerResponse): void {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders?.();
+    }
 }

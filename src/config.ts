@@ -4,6 +4,11 @@
 
 import type { AgentSkill } from "@a2a-js/sdk";
 
+import {
+    assertUniqueA2AInboundKeyLabels,
+    parseA2AInboundKeyLabel,
+} from "./utils/inbound-key-label.js";
+
 /**
  * Skill config accepted from users — same as AgentSkill but with `tags` optional
  * and without `security` (handled at the agent card level).
@@ -148,13 +153,14 @@ function parseApiKeys(value: unknown): A2AInboundKey[] | undefined {
             continue;
         }
         const e = entry as Record<string, unknown>;
-        const label = typeof e.label === "string" ? e.label.trim() : "";
+        const label = parseA2AInboundKeyLabel(e.label);
         const key = typeof e.key === "string" ? e.key : "";
         if (!label || !key) {
             continue;
         }
         keys.push({ label, key });
     }
+    assertUniqueA2AInboundKeyLabels(keys);
     return keys.length > 0 ? keys : undefined;
 }
 

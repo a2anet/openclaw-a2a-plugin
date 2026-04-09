@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentCard } from "@a2a-js/sdk";
 import type { DefaultRequestHandler } from "@a2a-js/sdk/server";
 
-import { createA2AHttpHandlers } from "../../src/inbound/http-adapter.js";
+import { A2AHttpHandlers } from "../../src/inbound/http-adapter.js";
 
 function makeAgentCard(): AgentCard {
     return {
@@ -26,12 +26,15 @@ function makeAgentCard(): AgentCard {
 
 function makeMockRequestHandler() {
     return {
+        getAgentCard: mock(async () => makeAgentCard()),
+        getAuthenticatedExtendedAgentCard: mock(async () => makeAgentCard()),
         sendMessage: mock(async () => ({ id: "task-1", status: { state: "completed" } })),
         sendMessageStream: mock(async function* () {
             yield { kind: "status-update", status: { state: "completed" } };
         }),
         getTask: mock(async () => ({ id: "task-1", status: { state: "completed" } })),
         cancelTask: mock(async () => ({ id: "task-1", status: { state: "canceled" } })),
+        resubscribe: mock(async function* () {}),
     } as unknown as DefaultRequestHandler;
 }
 
@@ -103,7 +106,7 @@ function makeRes() {
 describe("handleAgentCard", () => {
     test("returns agent card as JSON", async () => {
         const card = makeAgentCard();
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: card,
             requestHandler: makeMockRequestHandler(),
         });
@@ -116,7 +119,7 @@ describe("handleAgentCard", () => {
 
     test("returns a request-scoped agent card when a provider is supplied", async () => {
         const card = makeAgentCard();
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: card,
             getAgentCard: (req) => ({
                 ...card,
@@ -137,7 +140,7 @@ describe("handleAgentCard", () => {
 
 describe("handleJsonRpc", () => {
     test("rejects non-POST methods with 405", async () => {
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: makeMockRequestHandler(),
         });
@@ -149,7 +152,7 @@ describe("handleJsonRpc", () => {
     });
 
     test("rejects unauthenticated requests when auth required", async () => {
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: makeMockRequestHandler(),
             auth: { required: true, validKeys: [{ label: "test", key: "secret" }] },
@@ -167,7 +170,7 @@ describe("handleJsonRpc", () => {
 
     test("accepts authenticated requests", async () => {
         const handler = makeMockRequestHandler();
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: handler,
             auth: { required: true, validKeys: [{ label: "test", key: "secret" }] },
@@ -188,10 +191,15 @@ describe("handleJsonRpc", () => {
         const body = res.getJson() as Record<string, unknown>;
         expect(body.jsonrpc).toBe("2.0");
         expect(body.result).toBeDefined();
+        const context = (handler.sendMessage as ReturnType<typeof mock>).mock.calls[0]?.[1] as {
+            user?: { userName: string; isAuthenticated: boolean };
+        };
+        expect(context.user?.userName).toBe("test");
+        expect(context.user?.isAuthenticated).toBe(true);
     });
 
     test("rejects empty POST body with parse error", async () => {
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: makeMockRequestHandler(),
         });
@@ -204,7 +212,7 @@ describe("handleJsonRpc", () => {
     });
 
     test("rejects invalid JSON-RPC version", async () => {
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: makeMockRequestHandler(),
         });
@@ -216,7 +224,7 @@ describe("handleJsonRpc", () => {
     });
 
     test("rejects missing method", async () => {
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: makeMockRequestHandler(),
         });
@@ -228,11 +236,16 @@ describe("handleJsonRpc", () => {
     });
 
     test("returns method not found for unknown method", async () => {
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: makeMockRequestHandler(),
         });
-        const req = makeReq("POST", { jsonrpc: "2.0", id: 1, method: "unknown/method" });
+        const req = makeReq("POST", {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "unknown/method",
+            params: { probe: true },
+        });
         const res = makeRes();
         await handlers.handleJsonRpc(req, res);
         const body = res.getJson() as { error: { code: number; message: string } };
@@ -242,7 +255,7 @@ describe("handleJsonRpc", () => {
 
     test("routes message/send correctly", async () => {
         const handler = makeMockRequestHandler();
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: handler,
         });
@@ -255,12 +268,18 @@ describe("handleJsonRpc", () => {
         const res = makeRes();
         await handlers.handleJsonRpc(req, res);
         expect(handler.sendMessage).toHaveBeenCalledTimes(1);
+        const context = (handler.sendMessage as ReturnType<typeof mock>).mock.calls[0]?.[1] as {
+            user?: { userName: string; isAuthenticated: boolean };
+        };
+        expect(context.user?.userName).toBe("anonymous");
+        expect(context.user?.isAuthenticated).toBe(false);
     });
 
-    test("rejects message/send without message param", async () => {
-        const handlers = createA2AHttpHandlers({
+    test("passes message/send params through the transport handler", async () => {
+        const handler = makeMockRequestHandler();
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
-            requestHandler: makeMockRequestHandler(),
+            requestHandler: handler,
         });
         const req = makeReq("POST", {
             jsonrpc: "2.0",
@@ -270,13 +289,13 @@ describe("handleJsonRpc", () => {
         });
         const res = makeRes();
         await handlers.handleJsonRpc(req, res);
-        const body = res.getJson() as { error: { code: number } };
-        expect(body.error.code).toBe(-32602);
+        expect(handler.sendMessage).toHaveBeenCalledTimes(1);
+        expect((handler.sendMessage as ReturnType<typeof mock>).mock.calls[0]?.[0]).toEqual({});
     });
 
     test("routes tasks/get correctly", async () => {
         const handler = makeMockRequestHandler();
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: handler,
         });
@@ -293,7 +312,7 @@ describe("handleJsonRpc", () => {
 
     test("routes tasks/cancel correctly", async () => {
         const handler = makeMockRequestHandler();
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: handler,
         });
@@ -308,10 +327,11 @@ describe("handleJsonRpc", () => {
         expect(handler.cancelTask).toHaveBeenCalledTimes(1);
     });
 
-    test("rejects tasks/get without id", async () => {
-        const handlers = createA2AHttpHandlers({
+    test("passes tasks/get params through the transport handler", async () => {
+        const handler = makeMockRequestHandler();
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
-            requestHandler: makeMockRequestHandler(),
+            requestHandler: handler,
         });
         const req = makeReq("POST", {
             jsonrpc: "2.0",
@@ -321,8 +341,8 @@ describe("handleJsonRpc", () => {
         });
         const res = makeRes();
         await handlers.handleJsonRpc(req, res);
-        const body = res.getJson() as { error: { code: number } };
-        expect(body.error.code).toBe(-32602);
+        expect(handler.getTask).toHaveBeenCalledTimes(1);
+        expect((handler.getTask as ReturnType<typeof mock>).mock.calls[0]?.[0]).toEqual({});
     });
 
     test("handles server errors gracefully", async () => {
@@ -330,7 +350,7 @@ describe("handleJsonRpc", () => {
         (handler.sendMessage as ReturnType<typeof mock>).mockImplementation(async () => {
             throw new Error("Internal failure");
         });
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: handler,
         });
@@ -343,13 +363,13 @@ describe("handleJsonRpc", () => {
         const res = makeRes();
         await handlers.handleJsonRpc(req, res);
         const body = res.getJson() as { error: { code: number; message: string } };
-        expect(body.error.code).toBe(-32000);
+        expect(body.error.code).toBe(-32603);
         expect(body.error.message).toContain("Internal failure");
     });
 
     test("message/stream sends SSE events", async () => {
         const handler = makeMockRequestHandler();
-        const handlers = createA2AHttpHandlers({
+        const handlers = new A2AHttpHandlers({
             agentCard: makeAgentCard(),
             requestHandler: handler,
         });
@@ -363,6 +383,6 @@ describe("handleJsonRpc", () => {
         await handlers.handleJsonRpc(req, res);
         expect(res.getHeaders()["Content-Type"]).toContain("text/event-stream");
         expect(res.getBody()).toContain("data:");
-        expect(res.getBody()).toContain("[DONE]");
+        expect(res.getBody()).toContain('"kind":"status-update"');
     });
 });

@@ -2,11 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 
 import plugin from "../src/index.js";
 
 type CapturedCliRegistration = {
+    registrar?: (params: { program: FakeCommand }) => void;
     opts?: {
         commands?: string[];
         descriptors?: Array<{
@@ -22,6 +23,29 @@ type CapturedReloadRegistration = {
     hotPrefixes?: string[];
     noopPrefixes?: string[];
 };
+
+class FakeCommand {
+    subcommands = new Map<string, FakeCommand>();
+    actionHandler?: (...args: string[]) => unknown | Promise<unknown>;
+
+    constructor(readonly name = "root") {}
+
+    command(spec: string) {
+        const commandName = spec.split(" ")[0] ?? spec;
+        const command = new FakeCommand(commandName);
+        this.subcommands.set(commandName, command);
+        return command;
+    }
+
+    description(_text: string) {
+        return this;
+    }
+
+    action(handler: (...args: string[]) => unknown | Promise<unknown>) {
+        this.actionHandler = handler;
+        return this;
+    }
+}
 
 function createApi(options?: {
     pluginConfig?: Record<string, unknown>;
@@ -68,8 +92,11 @@ function createApi(options?: {
             registerTool(tool: { name: string }) {
                 tools.push(tool);
             },
-            registerCli(_registrar: unknown, opts?: CapturedCliRegistration["opts"]) {
-                cliRegistrations.push({ opts });
+            registerCli(
+                registrar: CapturedCliRegistration["registrar"],
+                opts?: CapturedCliRegistration["opts"],
+            ) {
+                cliRegistrations.push({ registrar, opts });
             },
             registerReload(registration: CapturedReloadRegistration) {
                 reloadRegistrations.push(registration);
@@ -162,5 +189,64 @@ describe("plugin registration", () => {
                 noopPrefixes: ["plugins.entries.a2a.config.inbound.agentCard"],
             },
         ]);
+    });
+
+    test("revoke-key matches labels case-insensitively", async () => {
+        const writeConfigFile = mock(async () => {});
+        const { api, cliRegistrations } = createApi({
+            config: {
+                agents: {
+                    defaults: {
+                        workspace: "/tmp",
+                    },
+                },
+            },
+        });
+        api.runtime.config.loadConfig = () => ({
+            plugins: {
+                entries: {
+                    a2a: {
+                        config: {
+                            inbound: {
+                                apiKeys: [
+                                    { label: "Alice", key: "secret-1" },
+                                    { label: "Bob", key: "secret-2" },
+                                ],
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        api.runtime.config.writeConfigFile = writeConfigFile;
+
+        plugin.register(api as never);
+
+        const program = new FakeCommand();
+        cliRegistrations[0]?.registrar?.({ program });
+        const revokeCommand = program.subcommands.get("a2a")?.subcommands.get("revoke-key");
+        expect(revokeCommand?.actionHandler).toBeDefined();
+
+        const consoleLogSpy = spyOn(console, "log").mockImplementation(() => {});
+        try {
+            await revokeCommand?.actionHandler?.("alice");
+        } finally {
+            consoleLogSpy.mockRestore();
+        }
+
+        expect(writeConfigFile).toHaveBeenCalledTimes(1);
+        expect(writeConfigFile.mock.calls[0]?.[0]).toEqual({
+            plugins: {
+                entries: {
+                    a2a: {
+                        config: {
+                            inbound: {
+                                apiKeys: [{ label: "Bob", key: "secret-2" }],
+                            },
+                        },
+                    },
+                },
+            },
+        });
     });
 });

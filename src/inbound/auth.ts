@@ -6,6 +6,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { A2AInboundKey } from "../config.js";
+import { isValidA2AInboundKeyLabel } from "../utils/inbound-key-label.js";
 
 /**
  * Generate a cryptographically random API key (base64url, 32 bytes).
@@ -48,7 +49,7 @@ export function validateApiKey(req: IncomingMessage, validKeys: A2AInboundKey[])
         return { ok: false, reason: "missing_key" };
     }
     for (const entry of validKeys) {
-        if (safeEqual(key, entry.key)) {
+        if (safeEqual(key, entry.key) && isValidA2AInboundKeyLabel(entry.label)) {
             return { ok: true, label: entry.label };
         }
     }

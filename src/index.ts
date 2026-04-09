@@ -17,12 +17,16 @@ import {
     extractA2AEntry,
     parseA2APluginConfig,
 } from "./config.js";
-import { buildAgentCard } from "./inbound/agent-card.js";
+import { AgentCardBuilder } from "./inbound/agent-card.js";
 import { generateApiKey } from "./inbound/auth.js";
 import { OpenClawExecutor } from "./inbound/executor.js";
-import { type A2AAuthConfig, createA2AHttpHandlers } from "./inbound/http-adapter.js";
+import { A2AHttpHandlers, type A2AAuthConfig } from "./inbound/http-adapter.js";
 import { createOutboundTools } from "./outbound/tools.js";
 import { createUpdateAgentCardTool } from "./tools/update-agent-card.js";
+import {
+    assertUniqueA2AInboundKeyLabels,
+    assertValidA2AInboundKeyLabel,
+} from "./utils/inbound-key-label.js";
 
 /**
  * Determine inbound auth configuration.
@@ -100,7 +104,7 @@ const a2aPlugin = definePluginEntry({
         // Lazy-initialized on first HTTP request (to determine public URL).
         // Uses a Promise lock to prevent concurrent initialization.
         let agentCard: AgentCard | null = null;
-        let httpHandlers: ReturnType<typeof createA2AHttpHandlers> | null = null;
+        let httpHandlers: A2AHttpHandlers | null = null;
         let initPromise: Promise<void> | null = null;
         let livePluginConfig = { ...pluginConfig };
 
@@ -117,12 +121,12 @@ const a2aPlugin = definePluginEntry({
                         return;
                     }
 
-                    agentCard = buildAgentCard({
+                    agentCard = new AgentCardBuilder({
                         openclawConfig: api.config,
                         pluginConfig: livePluginConfig,
                         publicUrl,
                         authRequired,
-                    });
+                    }).build();
 
                     const taskStore = new JSONTaskStore(`${stateDir}/a2a/inbound/tasks`);
                     const fileStore = new LocalFileStore(`${workspaceDir}/a2a/inbound/files`);
@@ -139,15 +143,15 @@ const a2aPlugin = definePluginEntry({
                         taskStore,
                         executor,
                     );
-                    httpHandlers = createA2AHttpHandlers({
+                    httpHandlers = new A2AHttpHandlers({
                         agentCard,
                         getAgentCard: (req) =>
-                            buildAgentCard({
+                            new AgentCardBuilder({
                                 openclawConfig: api.config,
                                 pluginConfig: livePluginConfig,
                                 publicUrl: resolveRequestPublicUrl(req),
                                 authRequired,
-                            }),
+                            }).build(),
                         requestHandler,
                         auth: authConfig,
                     });
@@ -233,12 +237,12 @@ const a2aPlugin = definePluginEntry({
                                 },
                             },
                         };
-                        const rebuilt = buildAgentCard({
+                        const rebuilt = new AgentCardBuilder({
                             openclawConfig: api.config,
                             pluginConfig: livePluginConfig,
                             publicUrl: agentCard.url.replace(/\/a2a$/, ""),
                             authRequired,
-                        });
+                        }).build();
                         Object.assign(agentCard, rebuilt);
                     },
                 }),
@@ -259,21 +263,22 @@ const a2aPlugin = definePluginEntry({
                 a2a.command("generate-key [label]")
                     .description("Generate a new inbound API key for A2A authentication")
                     .action(async (label?: string) => {
-                        const keyLabel = label?.trim() || `key-${Date.now()}`;
                         const key = generateApiKey();
                         try {
+                            const keyLabel = assertValidA2AInboundKeyLabel(
+                                label?.trim() || `key-${Date.now()}`,
+                            );
                             const currentConfig = api.runtime.config.loadConfig() as Record<
                                 string,
                                 unknown
                             >;
                             const { a2aConfig } = extractA2AEntry(currentConfig);
-                            const existingInbound = (a2aConfig.inbound ?? {}) as Record<
-                                string,
-                                unknown
-                            >;
-                            const existingKeys = Array.isArray(existingInbound.apiKeys)
-                                ? existingInbound.apiKeys
-                                : [];
+                            const existingInbound = parseA2APluginConfig(a2aConfig).inbound ?? {};
+                            const existingKeys = existingInbound.apiKeys ?? [];
+                            assertUniqueA2AInboundKeyLabels([
+                                ...existingKeys,
+                                { label: keyLabel, key },
+                            ]);
 
                             await api.runtime.config.writeConfigFile(
                                 buildRootConfigWithA2A(currentConfig, {
@@ -325,6 +330,7 @@ const a2aPlugin = definePluginEntry({
                     .description("Revoke an inbound A2A API key by label")
                     .action(async (label: string) => {
                         try {
+                            const targetLabel = label.trim().toLowerCase();
                             const currentConfig = api.runtime.config.loadConfig() as Record<
                                 string,
                                 unknown
@@ -339,7 +345,9 @@ const a2aPlugin = definePluginEntry({
                                 : [];
 
                             const filtered = existingKeys.filter(
-                                (k: Record<string, unknown>) => k.label !== label,
+                                (k: Record<string, unknown>) =>
+                                    typeof k.label !== "string" ||
+                                    k.label.trim().toLowerCase() !== targetLabel,
                             );
                             if (filtered.length === existingKeys.length) {
                                 console.log(`No key found with label "${label}".`);

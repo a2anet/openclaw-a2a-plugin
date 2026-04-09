@@ -41,4 +41,17 @@ describe("plugin definition", () => {
         expect(result.inbound?.agentCard?.name).toBe("Test");
         expect(result.outbound?.agents?.test?.url).toBe("https://example.com");
     });
+
+    test("config schema parse rejects duplicate inbound API key labels", () => {
+        expect(() =>
+            plugin.configSchema.parse({
+                inbound: {
+                    apiKeys: [
+                        { label: "alice", key: "first" },
+                        { label: "alice", key: "second" },
+                    ],
+                },
+            }),
+        ).toThrow('Inbound API key labels must be unique: "alice"');
+    });
 });
