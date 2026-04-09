@@ -263,44 +263,56 @@ recommended approach — it gives your machine a public HTTPS URL with automatic
 TLS certificates, no port forwarding or DNS configuration needed. You can also
 use any reverse proxy (nginx, Caddy, etc.).
 
+> **Note:** The commands below were verified on **macOS** (Apple Silicon)
+> with the [Tailscale Mac app](https://tailscale.com/download/mac). The
+> overall flow is the same on Linux and Windows, but the install and daemon
+> setup will differ — consult the
+> [Tailscale install docs](https://tailscale.com/kb/1347/installation) for
+> your OS.
+
 ##### Install Tailscale
 
-Linux:
+Install the **[Tailscale Mac app](https://tailscale.com/download/mac)**. The GUI app ships a Network Extension
+that plumbs MagicDNS into macOS's system resolver, so browsers and other apps
+can resolve your `*.ts.net` hostname.
+
+After installing, launch the app, click the Tailscale menu bar icon, and
+sign in. The CLI is bundled with the app.
+
+Confirm you're online:
 
 ```bash
-curl -fsSL https://tailscale.com/install.sh | sh
+tailscale status
 ```
 
-MacOS:
+You should see your node name, tailnet IP, and user.
+
+##### Provision an HTTPS Certificate
+
+Funnel needs a LetsEncrypt cert for your node's `*.ts.net` name. Running
+`tailscale cert` once provisions it and also confirms that HTTPS certificates
+and MagicDNS are enabled on your tailnet:
 
 ```bash
-brew install tailscale
+cd /tmp && tailscale cert "$(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')"
 ```
 
-Windows:
+The `cd /tmp` is because `tailscale cert` writes `<host>.crt` and
+`<host>.key` to the current directory.
 
-```bash
-winget install Tailscale.Tailscale
-```
-
-##### Sign In to Tailscale
-
-```bash
-tailscale up
-```
-
-##### Enable Funnel Prerequisites
-
-Enable HTTPS certificates (also enables MagicDNS if not already on):
-
-```bash
-tailscale cert $(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')
-```
-
-Enable funnel for the gateway:
+##### Enable Funnel
 
 ```bash
 tailscale funnel --bg http://localhost:18789
+```
+
+On success, Tailscale prints the public URL, e.g.:
+
+```
+Available on the internet:
+
+https://your-machine.tailXXXXXX.ts.net/
+|-- proxy http://localhost:18789
 ```
 
 If the `funnel` command fails with a policy error, you need to add the
@@ -316,11 +328,11 @@ Funnel ACL attribute in the [admin console](https://login.tailscale.com/admin/ac
 ]
 ```
 
-##### Start Funnel
-
-```bash
-tailscale serve funnel --bg http://localhost:18789
-```
+It can take up to a minute or two after `tailscale funnel --bg` returns
+before the public URL actually serves traffic from the open internet,
+because the Funnel edge has to propagate your config and finish TLS
+provisioning. If an external request returns a TLS error or "broken pipe",
+wait ~60s and retry.
 
 ##### Tailscale Serve (Tailnet-Only)
 
@@ -337,23 +349,25 @@ is reasonable.
 ##### Stopping Funnel
 
 ```bash
-tailscale serve funnel --https=443 off
+tailscale funnel --https=443 off
 ```
 
 #### 4. Verify
 
-Your OpenClaw should now have a public Agent Card:
+Open your Agent Card URL in a browser:
 
 ```
 https://your-machine.tail123.ts.net/.well-known/agent-card.json
 ```
+
+You should see the JSON Agent Card (name, description, skills, etc.).
 
 #### 5. Generate an API Key
 
 The Agent Card is public, but for other people to send messages to your OpenClaw you'll need to generate an API key for them:
 
 ```bash
-openclaw a2a generate-key alice
+openclaw a2a generate-key flynn
 ```
 
 #### 6. Customise Your Agent Card
