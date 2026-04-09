@@ -20,7 +20,7 @@ import {
 import { AgentCardBuilder } from "./inbound/agent-card.js";
 import { generateApiKey } from "./inbound/auth.js";
 import { OpenClawExecutor } from "./inbound/executor.js";
-import { A2AHttpHandlers, type A2AAuthConfig } from "./inbound/http-adapter.js";
+import { type A2AAuthConfig, A2AHttpHandlers } from "./inbound/http-adapter.js";
 import { createOutboundTools } from "./outbound/tools.js";
 import { createUpdateAgentCardTool } from "./tools/update-agent-card.js";
 import {

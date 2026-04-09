@@ -142,10 +142,7 @@ export class OpenClawExecutor implements AgentExecutor {
         } satisfies TaskStatusUpdateEvent);
     }
 
-    async execute(
-        requestContext: RequestContext,
-        eventBus: ExecutionEventBus,
-    ): Promise<void> {
+    async execute(requestContext: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
         const { taskId, userMessage } = requestContext;
         const effectiveContextId = requestContext.contextId ?? crypto.randomUUID();
         const senderLabel = requestContext.context?.user?.userName ?? ANONYMOUS_SENDER_LABEL;

@@ -29,8 +29,7 @@ export class AgentCardBuilder {
             this.agentCardConfig?.name ??
             this.resolveAgentName() ??
             `OpenClaw Agent (${this.agentId})`;
-        const description =
-            this.agentCardConfig?.description ?? "AI assistant powered by OpenClaw";
+        const description = this.agentCardConfig?.description ?? "AI assistant powered by OpenClaw";
         const baseUrl = this.params.publicUrl.replace(/\/$/, "");
 
         const card: AgentCard = {
