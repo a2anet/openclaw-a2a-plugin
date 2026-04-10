@@ -28,7 +28,7 @@
     "license": "Apache-2.0",
     "repository": {
         "type": "git",
-        "url": "https://github.com/a2anet/openclaw-a2a-plugin.git"
+        "url": "git+https://github.com/a2anet/openclaw-a2a-plugin.git"
     },
     "bugs": {
         "url": "https://github.com/a2anet/openclaw-a2a-plugin/issues"
