@@ -1,6 +1,6 @@
 {
     "name": "@a2anet/openclaw-a2a-plugin",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "A2A protocol plugin for OpenClaw. Send messages to remote A2A agents and allow others to connect to your agent.",
     "type": "module",
     "exports": {
@@ -11,7 +11,10 @@
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
-    "files": ["dist", "openclaw.plugin.json"],
+    "files": [
+        "dist",
+        "openclaw.plugin.json"
+    ],
     "scripts": {
         "build": "tsc",
         "check": "biome check .",
@@ -21,9 +24,16 @@
         "test:coverage": "bun test --coverage"
     },
     "openclaw": {
-        "extensions": ["./dist/index.js"]
+        "extensions": [
+            "./dist/index.js"
+        ]
     },
-    "keywords": ["a2a", "agent-to-agent", "openclaw", "plugin"],
+    "keywords": [
+        "a2a",
+        "agent-to-agent",
+        "openclaw",
+        "plugin"
+    ],
     "author": "A2A Net <hello@a2anet.com>",
     "license": "Apache-2.0",
     "repository": {
@@ -52,5 +62,7 @@
         "openclaw": "^2026.4.8",
         "typescript": "^5.7.0"
     },
-    "trustedDependencies": ["@biomejs/biome"]
+    "trustedDependencies": [
+        "@biomejs/biome"
+    ]
 }
