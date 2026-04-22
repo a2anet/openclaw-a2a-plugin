@@ -8,19 +8,44 @@
 Send messages and files to other agents over the internet, and/or allow your agent to receive messages and files with Tailscale.
 The plugin is powered by [A2A Utils](https://github.com/a2anet/a2a-utils), a comprehensive set of utility functions for using [A2A servers (remote agents)](https://a2a-protocol.org/latest/topics/key-concepts/#core-actors-in-a2a-interactions), that powers the [A2A MCP Server](https://github.com/a2anet/a2a-mcp).
 
-Inbound messages are organised into separate threads keyed by the sender and the A2A `context_id`, so every remote agent — and every distinct conversation from that agent — gets its own isolated thread. Multiple conversations can be in flight simultaneously, and a remote agent can continue an existing thread by reusing its `context_id` or start a fresh one by omitting it. Each inbound request is identified by the API key it presents: the `label` you give a key in config becomes the sender name attached to every message that key sends, so you can tell conversations apart and revoke access per-person by removing a single key.
+The plugin gives your agent 6 tools to send messages and files to other agents without relying on a third-party chat app or email:
 
-By default the plugin requires an API key on every inbound request and compares it with a timing-safe HMAC-SHA256 check. Keys are generated with `openclaw a2a generate-key <label>` and only shared with people you trust. You can opt out with `allowUnauthenticated: true` (reasonable for Tailscale Serve tailnet-only deployments), but leaving authentication on is strongly recommended when exposing your agent to the public internet.
+- `a2a_get_agents`: to list the agents it's connected to
+- `a2a_get_agent`: to view an agent's skills in detail
+- `a2a_send_message`: to send messages and files. The agent will respond with a `context_id` and `task_id`, which your agent can use to continue the conversation.
+- `a2a_get_task`: to poll for a response if either agent loses connection or a response hasn't been recieved in over a minute
+- `a2a_view_text_artifact`: to view large text responses that have been minimised
+- `a2a_view_data_artifact`: to view large data responses that have been minimised
+
+The plugin also allows your agent to receive messages and files with Tailscale and other reverse proxies (nginx, Caddy, etc).
+It's secure by default, requiring you to generate an API key (`openclaw a2a generate-key <label>`) for each agent you want to give access to.
+Your agent will see the sender (`<label>`), and each inbound message creates a separate conversation that is identified by the sender (`<label>`) and `context_id`.
+This way, your agent can support multiple conversations simulateneously, including from the same sender.
+
+## 📦 Installation
+
+Install the plugin:
+
+```bash
+openclaw plugins install @a2anet/openclaw-a2a-plugin
+```
+
+Restart the gateway:
+
+```bash
+openclaw gateway restart
+```
+
+Follow the set up instructions in "📤 Sending Messages (outbound)" and/or "📥 Receiving Messages (inbound)".
 
 ## 💡 Use Cases
 
-- Connect a sandboxed local OpenClaw to a full access OpenClaw in the cloud to efficiently share context and files
-- Connect your OpenClaw with a classmate's or co-worker's to work together on a project.
-- Connect your OpenClaw with a classmate's or co-worker's to sync code plans when vibe coding at the same time to avoid merge conflicts.
-- Connect your OpenClaw with a company-wide OpenClaw to ask questions, give updates, and access company accounts and services
+- Connect your OpenClaw to a company-wide OpenClaw to ask questions, give updates, and access company accounts and services
 - Connect your OpenClaw to agents on A2A marketplaces to ehance OpenClaw's capabilities
-- Connect your OpenClaw with a friend's to plan a fun day out based on what it knows about you
-- Connect your OpenClaw with a co-worker's to schedule a meeting and share all required information, documents, etc. up front
+- Connect a sandboxed local OpenClaw to a full access cloud OpenClaw to efficiently share context and files
+- Connect your OpenClaw to a hackathon teammate's to sync code plans when vibe coding at the same time to avoid merge conflicts
+- Connect your OpenClaw to a classmate's or co-worker's to work together on a project
+- Connect your OpenClaw to a friend's to plan a fun day out based on what it knows about you
 
 ## ✨ Features
 
@@ -46,22 +71,6 @@ The [A2A protocol](https://a2a-project.org/) is a protocol for agent-to-agent co
 - **Part** — content within a Message, Task, or Artifact: text (`TextPart`), JSON data (`DataPart`), or files (`FilePart`).
 - **Task** — a unit of work with a unique ID. Useful for long-running tasks, agents can disconnect and poll intermittently.
 - **Artifact** — output produced by a task (e.g. generated text, JSON data, files).
-
-## 📦 Installation
-
-To install the plugin:
-
-```bash
-openclaw plugins install @a2anet/openclaw-a2a-plugin
-```
-
-Then restart the gateway:
-
-```bash
-openclaw gateway restart
-```
-
-Follow the set up instructions in "📤 Sending Messages (outbound)" and/or "📥 Receiving Messages (inbound)".
 
 ## 📤 Sending Messages (outbound)
 
