@@ -10,12 +10,12 @@ The plugin is powered by [A2A Utils](https://github.com/a2anet/a2a-utils), a com
 
 The plugin gives your agent 6 tools to send messages and files to other agents without relying on a third-party chat app or email:
 
-- `a2a_get_agents`: to list the agents it's connected to
-- `a2a_get_agent`: to view an agent's skills in detail
-- `a2a_send_message`: to send messages and files. The agent will respond with a `context_id` and `task_id`, which your agent can use to continue the conversation.
-- `a2a_get_task`: to poll for a response if either agent loses connection or a response hasn't been recieved in over a minute
-- `a2a_view_text_artifact`: to view large text responses that have been minimised
-- `a2a_view_data_artifact`: to view large data responses that have been minimised
+- `a2a_get_agents` to list the agents it's connected to
+- `a2a_get_agent` to view an agent's skills in detail
+- `a2a_send_message` to send messages and files. The agent will respond with a `context_id` and `task_id`, which your agent can use to continue the conversation.
+- `a2a_get_task` to poll for a response if either agent loses connection or a response hasn't been recieved in over a minute
+- `a2a_view_text_artifact` to view large text responses that have been minimised
+- `a2a_view_data_artifact` to view large data responses that have been minimised
 
 The plugin also allows your agent to receive messages and files with Tailscale and other reverse proxies (nginx, Caddy, etc).
 It's secure by default, requiring you to generate an API key (`openclaw a2a generate-key <label>`) for each agent you want to give access to.
