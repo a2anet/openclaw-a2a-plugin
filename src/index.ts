@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-export const VERSION = "0.1.2"; // x-release-please-version
+export const VERSION = "0.1.3"; // x-release-please-version
 
 import type { AgentCard } from "@a2a-js/sdk";
 import { DefaultRequestHandler } from "@a2a-js/sdk/server";
