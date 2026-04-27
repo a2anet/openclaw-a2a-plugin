@@ -62,3 +62,34 @@ jobs:
           path: dist/
       - name: Publish to npm
         run: npm publish --provenance --access public
+
+  publish-clawhub:
+    name: Publish to ClawHub
+    needs: [release-please, build]
+    runs-on: ubuntu-latest
+    environment: clawhub
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install ClawHub CLI
+        run: npm i -g clawhub
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Authenticate to ClawHub
+        run: clawhub --no-input login --token "$CLAWHUB_TOKEN" --no-browser
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+      - name: Publish to ClawHub
+        run: |
+          clawhub --no-input package publish . \
+            --source-repo "$GITHUB_REPOSITORY" \
+            --source-commit "$GITHUB_SHA" \
+            --source-ref "${{ needs.release-please.outputs.tag_name }}"
+        env:
+          CLAWHUB_DISABLE_TELEMETRY: "1"
