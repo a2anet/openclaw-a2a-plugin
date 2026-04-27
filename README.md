@@ -22,6 +22,10 @@ It's secure by default, requiring you to generate an API key (`openclaw a2a gene
 Your agent will see the sender (`<label>`), and each inbound message creates a separate conversation that is identified by the sender (`<label>`) and `context_id`.
 This way, your agent can support multiple conversations simulateneously, including from the same sender.
 
+## 📺 Demo
+
+Watch [OpenClaw A2A Plugin Demo - Connect your OpenClaw to other OpenClaws (and agents) over the internet](https://youtu.be/bodb7ATn5nc?si=9uVltb4K6-4Z8hPE) on YouTube.
+
 ## 📦 Installation
 
 Install the plugin:
