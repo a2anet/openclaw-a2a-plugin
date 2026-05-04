@@ -42,7 +42,8 @@ export function createUpdateAgentCardTool(deps: UpdateAgentCardDeps): AgentTool 
                 ),
             ),
         }),
-        async execute(_toolCallId, params) {
+        async execute(_toolCallId, rawParams) {
+            const params = rawParams as Record<string, unknown>;
             const name = typeof params.name === "string" ? params.name.trim() : undefined;
             const description =
                 typeof params.description === "string" ? params.description.trim() : undefined;

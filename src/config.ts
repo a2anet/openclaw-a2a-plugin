@@ -55,6 +55,20 @@ export type A2APluginConfig = {
     inbound?: A2AInboundConfig;
 };
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+}
+
+function parseTrimmedString(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed || undefined;
+}
+
 function parseStringArray(value: unknown): string[] | undefined {
     if (!Array.isArray(value)) {
         return undefined;
@@ -71,13 +85,13 @@ function parseSkills(value: unknown): A2ASkillConfig[] | undefined {
     }
     const result: A2ASkillConfig[] = [];
     for (const entry of value) {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        const raw = asRecord(entry);
+        if (!raw) {
             continue;
         }
-        const raw = entry as Record<string, unknown>;
-        const id = typeof raw.id === "string" ? raw.id.trim() : "";
-        const name = typeof raw.name === "string" ? raw.name.trim() : "";
-        const description = typeof raw.description === "string" ? raw.description.trim() : "";
+        const id = parseTrimmedString(raw.id);
+        const name = parseTrimmedString(raw.name);
+        const description = parseTrimmedString(raw.description);
         if (!id || !name || !description) {
             continue;
         }
@@ -104,28 +118,22 @@ function parseSkills(value: unknown): A2ASkillConfig[] | undefined {
 }
 
 function parseAgents(value: unknown): Record<string, A2AAgentEntry> | undefined {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    const raw = asRecord(value);
+    if (!raw) {
         return undefined;
     }
-    const raw = value as Record<string, unknown>;
     const result: Record<string, A2AAgentEntry> = {};
     for (const [id, entry] of Object.entries(raw)) {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-            continue;
-        }
-        const e = entry as Record<string, unknown>;
-        const url = typeof e.url === "string" ? e.url.trim() : "";
+        const e = asRecord(entry);
+        const url = parseTrimmedString(e?.url);
         if (!url) {
             continue;
         }
         let custom_headers: Record<string, string> | undefined;
-        if (
-            e.custom_headers &&
-            typeof e.custom_headers === "object" &&
-            !Array.isArray(e.custom_headers)
-        ) {
+        const headers = asRecord(e?.custom_headers);
+        if (headers) {
             const filtered: Record<string, string> = {};
-            for (const [hk, hv] of Object.entries(e.custom_headers as Record<string, unknown>)) {
+            for (const [hk, hv] of Object.entries(headers)) {
                 if (typeof hv === "string") {
                     filtered[hk] = hv;
                 }
@@ -143,16 +151,26 @@ function parsePositiveNumber(value: unknown): number | undefined {
     return typeof value === "number" && value > 0 ? value : undefined;
 }
 
+const OUTBOUND_NUMBER_KEYS = [
+    "sendMessageCharacterLimit",
+    "minimizedObjectStringLength",
+    "viewArtifactCharacterLimit",
+    "agentCardTimeout",
+    "sendMessageTimeout",
+    "getTaskTimeout",
+    "getTaskPollInterval",
+] as const;
+
 function parseApiKeys(value: unknown): A2AInboundKey[] | undefined {
     if (!Array.isArray(value)) {
         return undefined;
     }
     const keys: A2AInboundKey[] = [];
     for (const entry of value) {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        const e = asRecord(entry);
+        if (!e) {
             continue;
         }
-        const e = entry as Record<string, unknown>;
         const label = parseA2AInboundKeyLabel(e.label);
         const key = typeof e.key === "string" ? e.key : "";
         if (!label || !key) {
@@ -165,13 +183,12 @@ function parseApiKeys(value: unknown): A2AInboundKey[] | undefined {
 }
 
 function parseAgentCard(value: unknown): A2AAgentCardConfig | undefined {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    const raw = asRecord(value);
+    if (!raw) {
         return undefined;
     }
-    const raw = value as Record<string, unknown>;
-    const name = typeof raw.name === "string" ? raw.name.trim() || undefined : undefined;
-    const description =
-        typeof raw.description === "string" ? raw.description.trim() || undefined : undefined;
+    const name = parseTrimmedString(raw.name);
+    const description = parseTrimmedString(raw.description);
     const skills = parseSkills(raw.skills);
     if (name === undefined && description === undefined && skills === undefined) {
         return undefined;
@@ -184,44 +201,33 @@ function parseAgentCard(value: unknown): A2AAgentCardConfig | undefined {
 }
 
 function parseOutbound(value: unknown): A2AOutboundConfig | undefined {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    const raw = asRecord(value);
+    if (!raw) {
         return undefined;
     }
-    const raw = value as Record<string, unknown>;
     const agents = parseAgents(raw.agents);
     const taskStore = typeof raw.taskStore === "boolean" ? raw.taskStore : undefined;
     const fileStore = typeof raw.fileStore === "boolean" ? raw.fileStore : undefined;
-    const sendMessageCharacterLimit = parsePositiveNumber(raw.sendMessageCharacterLimit);
-    const minimizedObjectStringLength = parsePositiveNumber(raw.minimizedObjectStringLength);
-    const viewArtifactCharacterLimit = parsePositiveNumber(raw.viewArtifactCharacterLimit);
-    const agentCardTimeout = parsePositiveNumber(raw.agentCardTimeout);
-    const sendMessageTimeout = parsePositiveNumber(raw.sendMessageTimeout);
-    const getTaskTimeout = parsePositiveNumber(raw.getTaskTimeout);
-    const getTaskPollInterval = parsePositiveNumber(raw.getTaskPollInterval);
 
     const result: A2AOutboundConfig = {};
     if (agents) result.agents = agents;
     if (taskStore !== undefined) result.taskStore = taskStore;
     if (fileStore !== undefined) result.fileStore = fileStore;
-    if (sendMessageCharacterLimit !== undefined)
-        result.sendMessageCharacterLimit = sendMessageCharacterLimit;
-    if (minimizedObjectStringLength !== undefined)
-        result.minimizedObjectStringLength = minimizedObjectStringLength;
-    if (viewArtifactCharacterLimit !== undefined)
-        result.viewArtifactCharacterLimit = viewArtifactCharacterLimit;
-    if (agentCardTimeout !== undefined) result.agentCardTimeout = agentCardTimeout;
-    if (sendMessageTimeout !== undefined) result.sendMessageTimeout = sendMessageTimeout;
-    if (getTaskTimeout !== undefined) result.getTaskTimeout = getTaskTimeout;
-    if (getTaskPollInterval !== undefined) result.getTaskPollInterval = getTaskPollInterval;
+    for (const key of OUTBOUND_NUMBER_KEYS) {
+        const value = parsePositiveNumber(raw[key]);
+        if (value !== undefined) {
+            result[key] = value;
+        }
+    }
 
     return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function parseInbound(value: unknown): A2AInboundConfig | undefined {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    const raw = asRecord(value);
+    if (!raw) {
         return undefined;
     }
-    const raw = value as Record<string, unknown>;
     const agentCard = parseAgentCard(raw.agentCard);
     const allowUnauthenticated =
         typeof raw.allowUnauthenticated === "boolean" ? raw.allowUnauthenticated : undefined;
@@ -238,10 +244,10 @@ function parseInbound(value: unknown): A2AInboundConfig | undefined {
 }
 
 export function parseA2APluginConfig(value: unknown): A2APluginConfig {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    const raw = asRecord(value);
+    if (!raw) {
         return {};
     }
-    const raw = value as Record<string, unknown>;
     const outbound = parseOutbound(raw.outbound);
     const inbound = parseInbound(raw.inbound);
 
