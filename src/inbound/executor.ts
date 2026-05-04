@@ -19,9 +19,13 @@ import { dispatchInboundReplyWithBase } from "openclaw/plugin-sdk/inbound-reply-
 import { resolveOutboundMediaUrls } from "openclaw/plugin-sdk/reply-payload";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 
-const CHANNEL_ID = "a2a";
-const ANONYMOUS_SENDER_LABEL = "anonymous";
-const DEFAULT_CLIENT_ERROR_MESSAGE = "Something went wrong.";
+import {
+    A2A_CHANNEL_ID,
+    A2A_STORAGE_DIR,
+    ANONYMOUS_SENDER_LABEL,
+    DEFAULT_CLIENT_ERROR_MESSAGE,
+    REQUEST_CANCELED_MESSAGE,
+} from "../constants.js";
 
 type TaskExecutionState = {
     controller: AbortController;
@@ -83,7 +87,7 @@ export class OpenClawExecutor implements AgentExecutor {
     private static toClientErrorMessage(err: unknown): string {
         if (err instanceof AttachedFileRetrievalError) {
             if (OpenClawExecutor.isAbortLikeError(err.cause)) {
-                return "The request was canceled.";
+                return REQUEST_CANCELED_MESSAGE;
             }
             if (OpenClawExecutor.isTimeoutLikeError(err.cause)) {
                 return "The request timed out.";
@@ -91,7 +95,7 @@ export class OpenClawExecutor implements AgentExecutor {
             return "The attached file could not be retrieved.";
         }
         if (OpenClawExecutor.isAbortLikeError(err)) {
-            return "The request was canceled.";
+            return REQUEST_CANCELED_MESSAGE;
         }
         if (OpenClawExecutor.isTimeoutLikeError(err)) {
             return "The request timed out.";
@@ -107,7 +111,9 @@ export class OpenClawExecutor implements AgentExecutor {
             params.fileStore === null
                 ? null
                 : (params.fileStore ??
-                  new LocalFileStore(path.join(params.workspaceDir, "a2a", "inbound", "files")));
+                  new LocalFileStore(
+                      path.join(params.workspaceDir, A2A_STORAGE_DIR, "inbound", "files"),
+                  ));
     }
 
     private publishFinalStatusUpdate(params: {
@@ -222,7 +228,7 @@ export class OpenClawExecutor implements AgentExecutor {
 
             const baseSessionKey = this.runtime.channel.routing.buildAgentSessionKey({
                 agentId: this.agentId,
-                channel: CHANNEL_ID,
+                channel: A2A_CHANNEL_ID,
                 peer: { kind: "direct", id: senderLabel },
                 dmScope: "per-peer",
             });
@@ -238,18 +244,18 @@ export class OpenClawExecutor implements AgentExecutor {
                 RawBody: gatewayText,
                 CommandBody: gatewayText,
                 BodyForCommands: gatewayText,
-                From: `a2a:${senderLabel}`,
-                To: `a2a:${this.agentId}`,
+                From: `${A2A_CHANNEL_ID}:${senderLabel}`,
+                To: `${A2A_CHANNEL_ID}:${this.agentId}`,
                 SessionKey: sessionKey,
-                SenderId: `a2a:${senderLabel}`,
+                SenderId: `${A2A_CHANNEL_ID}:${senderLabel}`,
                 SenderName: senderLabel,
-                Provider: CHANNEL_ID,
-                Surface: CHANNEL_ID,
+                Provider: A2A_CHANNEL_ID,
+                Surface: A2A_CHANNEL_ID,
                 ChatType: "direct",
                 ConversationLabel: effectiveContextId,
                 MessageThreadId: effectiveContextId,
                 ParentSessionKey: parentSessionKey,
-                InputProvenance: { kind: "external_user", sourceChannel: CHANNEL_ID },
+                InputProvenance: { kind: "external_user", sourceChannel: A2A_CHANNEL_ID },
                 ForceSenderIsOwnerFalse: true,
                 Timestamp: Date.now(),
                 CommandAuthorized: false,
@@ -263,7 +269,7 @@ export class OpenClawExecutor implements AgentExecutor {
 
             await dispatchInboundReplyWithBase({
                 cfg: this.config,
-                channel: CHANNEL_ID,
+                channel: A2A_CHANNEL_ID,
                 route: { agentId: this.agentId, sessionKey },
                 storePath,
                 ctxPayload: finalizedCtx,
@@ -370,7 +376,7 @@ export class OpenClawExecutor implements AgentExecutor {
             taskId,
             contextId: executionState.contextId,
             state: "canceled",
-            message: "The request was canceled.",
+            message: REQUEST_CANCELED_MESSAGE,
         });
         targetEventBus.finished();
         this.taskExecutions.delete(taskId);

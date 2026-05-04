@@ -8,10 +8,10 @@ import type { A2ARequestHandler, User } from "@a2a-js/sdk/server";
 import { JsonRpcTransportHandler, ServerCallContext } from "@a2a-js/sdk/server";
 
 import type { A2AInboundKey } from "../config.js";
+import { ANONYMOUS_SENDER_LABEL, JSON_CONTENT_TYPE, SSE_CONTENT_TYPE } from "../constants.js";
 import { sendAuthError, validateApiKey } from "./auth.js";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
-const ANONYMOUS_SENDER_LABEL = "anonymous";
 
 class A2ARequestUser implements User {
     constructor(
@@ -167,13 +167,13 @@ export class A2AHttpHandlers {
 
     private sendJson(res: ServerResponse, status: number, body: unknown): void {
         res.statusCode = status;
-        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Content-Type", JSON_CONTENT_TYPE);
         res.end(JSON.stringify(body));
     }
 
     private setSseHeaders(res: ServerResponse): void {
         res.statusCode = 200;
-        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        res.setHeader("Content-Type", SSE_CONTENT_TYPE);
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Connection", "keep-alive");
         res.setHeader("X-Accel-Buffering", "no");

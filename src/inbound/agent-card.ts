@@ -6,6 +6,7 @@ import type { AgentCard, AgentSkill } from "@a2a-js/sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 import type { A2AAgentCardConfig, A2APluginConfig, A2ASkillConfig } from "../config.js";
+import { A2A_ROUTE } from "../constants.js";
 
 export type BuildAgentCardParams = {
     openclawConfig: OpenClawConfig;
@@ -37,7 +38,7 @@ export class AgentCardBuilder {
             description,
             protocolVersion: "0.3.0",
             version: "1.0.0",
-            url: `${baseUrl}/a2a`,
+            url: `${baseUrl}${A2A_ROUTE}`,
             capabilities: {
                 streaming: true,
                 pushNotifications: false,
@@ -57,10 +58,6 @@ export class AgentCardBuilder {
         return card;
     }
 
-    /**
-     * Resolve the agent name from OpenClaw config.
-     * Navigates `config.agents.list[].identity.name` or `config.agents.list[].name`.
-     */
     private resolveAgentName(): string | undefined {
         const agents = this.params.openclawConfig.agents?.list;
         if (!Array.isArray(agents)) {

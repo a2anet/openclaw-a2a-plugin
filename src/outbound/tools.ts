@@ -14,6 +14,7 @@ import {
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import type { A2AAgentEntry } from "../config.js";
+import { A2A_CHANNEL_ID, A2A_STORAGE_DIR } from "../constants.js";
 import { type AgentTool, jsonResult } from "../types.js";
 
 export type CreateOutboundToolsParams = {
@@ -31,13 +32,6 @@ export type CreateOutboundToolsParams = {
     viewArtifactCharacterLimit?: number;
 };
 
-/**
- * Create the 6 outbound A2A tools backed by @a2anet/a2a-utils.
- *
- * This is the thin wrapper that bridges A2ATools to OpenClaw's tool registration
- * format. Tool metadata (name, description, schema) comes from a2a-utils;
- * the `a2a_` prefix is added here for OpenClaw namespacing.
- */
 export function createOutboundTools(params: CreateOutboundToolsParams): AgentTool[] {
     const agents = new A2AAgents(
         params.agents as Record<string, Record<string, unknown>>,
@@ -46,11 +40,11 @@ export function createOutboundTools(params: CreateOutboundToolsParams): AgentToo
 
     const taskStore =
         params.taskStore !== false
-            ? new JSONTaskStore(`${params.stateDir}/a2a/outbound/tasks`)
+            ? new JSONTaskStore(`${params.stateDir}/${A2A_STORAGE_DIR}/outbound/tasks`)
             : undefined;
     const fileStore =
         params.fileStore !== false
-            ? new LocalFileStore(`${params.workspaceDir}/a2a/outbound/files`)
+            ? new LocalFileStore(`${params.workspaceDir}/${A2A_STORAGE_DIR}/outbound/files`)
             : undefined;
 
     const session = new A2ASession(agents, {
@@ -72,10 +66,10 @@ export function createOutboundTools(params: CreateOutboundToolsParams): AgentToo
     return (tools.tools as A2AToolDefinition[]).map((def) => {
         const { $schema: _, ...jsonSchema } = zodToJsonSchema(def.schema, { target: "openAi" });
         return {
-            name: `a2a_${def.name}`,
-            label: `a2a_${def.name}`,
+            name: `${A2A_CHANNEL_ID}_${def.name}`,
+            label: `${A2A_CHANNEL_ID}_${def.name}`,
             description: def.description,
-            parameters: jsonSchema,
+            parameters: jsonSchema as AgentTool["parameters"],
             execute: async (_toolCallId: string, params: Record<string, unknown>) =>
                 jsonResult(await def.execute(params)),
         };

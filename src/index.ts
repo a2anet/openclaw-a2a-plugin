@@ -17,6 +17,7 @@ import {
     extractA2AEntry,
     parseA2APluginConfig,
 } from "./config.js";
+import { A2A_CHANNEL_ID, A2A_ROUTE, A2A_STORAGE_DIR } from "./constants.js";
 import { AgentCardBuilder } from "./inbound/agent-card.js";
 import { generateApiKey } from "./inbound/auth.js";
 import { OpenClawExecutor } from "./inbound/executor.js";
@@ -57,7 +58,7 @@ function resolveInboundAuth(
 }
 
 const a2aPlugin = definePluginEntry({
-    id: "a2a",
+    id: A2A_CHANNEL_ID,
     name: "A2A Protocol",
     description:
         "A2A protocol plugin for OpenClaw. Communicate with remote A2A agents and allow others to connect to your agent.",
@@ -107,6 +108,13 @@ const a2aPlugin = definePluginEntry({
         let httpHandlers: A2AHttpHandlers | null = null;
         let initPromise: Promise<void> | null = null;
         let livePluginConfig = { ...pluginConfig };
+        const buildAgentCard = (publicUrl: string) =>
+            new AgentCardBuilder({
+                openclawConfig: api.config,
+                pluginConfig: livePluginConfig,
+                publicUrl,
+                authRequired,
+            }).build();
 
         const initializeInbound = (publicUrl: string): Promise<void> => {
             if (agentCard) {
@@ -121,15 +129,14 @@ const a2aPlugin = definePluginEntry({
                         return;
                     }
 
-                    agentCard = new AgentCardBuilder({
-                        openclawConfig: api.config,
-                        pluginConfig: livePluginConfig,
-                        publicUrl,
-                        authRequired,
-                    }).build();
+                    agentCard = buildAgentCard(publicUrl);
 
-                    const taskStore = new JSONTaskStore(`${stateDir}/a2a/inbound/tasks`);
-                    const fileStore = new LocalFileStore(`${workspaceDir}/a2a/inbound/files`);
+                    const taskStore = new JSONTaskStore(
+                        `${stateDir}/${A2A_STORAGE_DIR}/inbound/tasks`,
+                    );
+                    const fileStore = new LocalFileStore(
+                        `${workspaceDir}/${A2A_STORAGE_DIR}/inbound/files`,
+                    );
                     const executor = new OpenClawExecutor({
                         agentId: "main",
                         runtime: api.runtime,
@@ -145,13 +152,7 @@ const a2aPlugin = definePluginEntry({
                     );
                     httpHandlers = new A2AHttpHandlers({
                         agentCard,
-                        getAgentCard: (req) =>
-                            new AgentCardBuilder({
-                                openclawConfig: api.config,
-                                pluginConfig: livePluginConfig,
-                                publicUrl: resolveRequestPublicUrl(req),
-                                authRequired,
-                            }).build(),
+                        getAgentCard: (req) => buildAgentCard(resolveRequestPublicUrl(req)),
                         requestHandler,
                         auth: authConfig,
                     });
@@ -197,7 +198,7 @@ const a2aPlugin = definePluginEntry({
         });
 
         api.registerHttpRoute({
-            path: "/a2a",
+            path: A2A_ROUTE,
             auth: "plugin",
             handler: async (req, res) => {
                 if (!httpHandlers) {
@@ -237,13 +238,10 @@ const a2aPlugin = definePluginEntry({
                                 },
                             },
                         };
-                        const rebuilt = new AgentCardBuilder({
-                            openclawConfig: api.config,
-                            pluginConfig: livePluginConfig,
-                            publicUrl: agentCard.url.replace(/\/a2a$/, ""),
-                            authRequired,
-                        }).build();
-                        Object.assign(agentCard, rebuilt);
+                        Object.assign(
+                            agentCard,
+                            buildAgentCard(agentCard.url.replace(new RegExp(`${A2A_ROUTE}$`), "")),
+                        );
                     },
                 }),
             );
@@ -257,7 +255,7 @@ const a2aPlugin = definePluginEntry({
         api.registerCli(
             ({ program }) => {
                 const a2a = program
-                    .command("a2a")
+                    .command(A2A_CHANNEL_ID)
                     .description("Manage A2A plugin keys and local configuration");
 
                 a2a.command("generate-key [label]")
@@ -375,7 +373,7 @@ const a2aPlugin = definePluginEntry({
             {
                 descriptors: [
                     {
-                        name: "a2a",
+                        name: A2A_CHANNEL_ID,
                         description: "Manage A2A plugin keys and local configuration",
                         hasSubcommands: true,
                     },
@@ -385,7 +383,7 @@ const a2aPlugin = definePluginEntry({
 
         // --- Lifecycle service ---
         api.registerService({
-            id: "a2a",
+            id: A2A_CHANNEL_ID,
             start: async () => {
                 api.logger.info("[a2a] A2A service started");
             },
