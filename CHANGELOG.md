@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/a2anet/openclaw-a2a-plugin/compare/openclaw-a2a-plugin-v0.1.3...openclaw-a2a-plugin-v0.1.4) (2026-05-20)
+
+
+### Bug Fixes
+
+* expose A2A tools to Codex via `contracts.tools` and `tool-discovery` registration ([7f9db67](https://github.com/a2anet/openclaw-a2a-plugin/commit/7f9db670acf00fe05d8780dd518c052b2e7e54a2))
+
 ## [0.1.3](https://github.com/a2anet/openclaw-a2a-plugin/compare/openclaw-a2a-plugin-v0.1.2...openclaw-a2a-plugin-v0.1.3) (2026-05-08)
 
 
