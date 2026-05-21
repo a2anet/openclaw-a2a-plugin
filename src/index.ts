@@ -395,7 +395,10 @@ const a2aPlugin = definePluginEntry({
                 if (!httpHandlers) {
                     await initializeInbound(resolveRequestPublicUrl(req));
                 }
-                if (httpHandlers) {
+                if (!httpHandlers) return;
+                if (req.method === "GET" || req.method === "HEAD") {
+                    await httpHandlers.handleAgentCard(req, res);
+                } else {
                     await httpHandlers.handleJsonRpc(req, res);
                 }
             },
