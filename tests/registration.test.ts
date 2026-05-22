@@ -68,6 +68,8 @@ function createApi(options?: {
         | "setup-runtime";
 }) {
     const tools: Array<{ name: string }> = [];
+    type ToolFactory = (ctx: { agentId?: string }) => { name: string } | null | undefined;
+    const toolFactories: ToolFactory[] = [];
     const cliRegistrations: CapturedCliRegistration[] = [];
     const reloadRegistrations: CapturedReloadRegistration[] = [];
     const httpRoutes: CapturedHttpRoute[] = [];
@@ -78,6 +80,7 @@ function createApi(options?: {
 
     return {
         tools,
+        toolFactories,
         cliRegistrations,
         reloadRegistrations,
         httpRoutes,
@@ -114,7 +117,16 @@ function createApi(options?: {
                 error() {},
                 debug() {},
             },
-            registerTool(tool: { name: string }) {
+            registerTool(tool: { name: string } | ToolFactory) {
+                // Plugin-owned tools may be factories resolved per calling agent.
+                if (typeof tool === "function") {
+                    toolFactories.push(tool);
+                    const resolved = tool({ agentId: "main" });
+                    if (resolved) {
+                        tools.push(resolved);
+                    }
+                    return;
+                }
                 tools.push(tool);
             },
             registerCli(
@@ -208,6 +220,43 @@ describe("plugin registration", () => {
         ]);
     });
 
+    test("registers single-agent HTTP routes on the default paths", () => {
+        const { api, httpRoutes } = createApi();
+
+        plugin.register(api as never);
+
+        expect(httpRoutes.map((route) => route.path).sort()).toEqual([
+            "/.well-known/agent-card.json",
+            "/a2a",
+        ]);
+        for (const route of httpRoutes) {
+            expect(route.auth).toBe("plugin");
+        }
+    });
+
+    test("registers per-agent HTTP routes when inbound.agents is configured", () => {
+        const { api, httpRoutes } = createApi({
+            pluginConfig: {
+                inbound: {
+                    apiKeys: [{ label: "test", key: "secret" }],
+                    agents: {
+                        swe: { agentCard: { name: "SWE" } },
+                        pmo: { agentCard: { name: "PMO" } },
+                    },
+                },
+            },
+        });
+
+        plugin.register(api as never);
+
+        expect(httpRoutes.map((route) => route.path).sort()).toEqual([
+            "/a2a/pmo",
+            "/a2a/pmo/agent-card.json",
+            "/a2a/swe",
+            "/a2a/swe/agent-card.json",
+        ]);
+    });
+
     test("marks live agent-card config writes as no-op reloads", () => {
         const { api, reloadRegistrations } = createApi();
 
@@ -216,6 +265,32 @@ describe("plugin registration", () => {
         expect(reloadRegistrations).toEqual([
             {
                 noopPrefixes: ["plugins.entries.a2a.config.inbound.agentCard"],
+            },
+        ]);
+    });
+
+    test("marks per-agent card writes as no-op reloads in multi-agent mode", () => {
+        const { api, reloadRegistrations } = createApi({
+            pluginConfig: {
+                inbound: {
+                    apiKeys: [{ label: "test", key: "secret" }],
+                    agents: {
+                        swe: { agentCard: { name: "SWE" } },
+                        pmo: { agentCard: { name: "PMO" } },
+                    },
+                },
+            },
+        });
+
+        plugin.register(api as never);
+
+        expect(reloadRegistrations).toEqual([
+            {
+                noopPrefixes: [
+                    "plugins.entries.a2a.config.inbound.agentCard",
+                    "plugins.entries.a2a.config.inbound.agents.swe.agentCard",
+                    "plugins.entries.a2a.config.inbound.agents.pmo.agentCard",
+                ],
             },
         ]);
     });
@@ -363,6 +438,30 @@ describe("OpenClaw registration mode compatibility", () => {
         plugin.register(api as never);
 
         expect(tools.map((tool) => tool.name)).toContain("a2a_update_agent_card");
+    });
+
+    test("update_agent_card resolves to the calling agent in multi-agent mode", () => {
+        const { api, toolFactories } = createApi({
+            pluginConfig: {
+                inbound: {
+                    apiKeys: [{ label: "test", key: "secret" }],
+                    agents: {
+                        swe: { agentCard: { name: "SWE" } },
+                        pmo: { agentCard: { name: "PMO" } },
+                    },
+                },
+            },
+        });
+
+        plugin.register(api as never);
+
+        expect(toolFactories).toHaveLength(1);
+        const factory = toolFactories[0];
+        // A configured agent gets the tool; others (and missing IDs) get nothing.
+        expect(factory({ agentId: "swe" })?.name).toBe("a2a_update_agent_card");
+        expect(factory({ agentId: "pmo" })?.name).toBe("a2a_update_agent_card");
+        expect(factory({ agentId: "unknown" })).toBeNull();
+        expect(factory({})).toBeNull();
     });
 
     test("discovery mode does not crash on empty runtime", () => {

@@ -28,6 +28,10 @@
             "label": "Agent Card",
             "help": "Customise how your agent appears to other agents"
         },
+        "inbound.agents": {
+            "label": "Hosted Agents",
+            "help": "Expose multiple agents, keyed by agent ID, each on its own /a2a/<agentId> endpoint and Agent Card"
+        },
         "inbound.apiKeys": {
             "label": "API Keys",
             "help": "Authentication keys for incoming A2A requests"
@@ -36,6 +40,33 @@
     "configSchema": {
         "type": "object",
         "additionalProperties": false,
+        "$defs": {
+            "agentCard": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "name": { "type": "string" },
+                    "description": { "type": "string" },
+                    "skills": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["id", "name", "description"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "id": { "type": "string" },
+                                "name": { "type": "string" },
+                                "description": { "type": "string" },
+                                "tags": { "type": "array", "items": { "type": "string" } },
+                                "examples": { "type": "array", "items": { "type": "string" } },
+                                "inputModes": { "type": "array", "items": { "type": "string" } },
+                                "outputModes": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "properties": {
             "outbound": {
                 "type": "object",
@@ -71,37 +102,14 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                    "agentCard": {
+                    "agentCard": { "$ref": "#/$defs/agentCard" },
+                    "agents": {
                         "type": "object",
-                        "additionalProperties": false,
-                        "properties": {
-                            "name": { "type": "string" },
-                            "description": { "type": "string" },
-                            "skills": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "required": ["id", "name", "description"],
-                                    "additionalProperties": false,
-                                    "properties": {
-                                        "id": { "type": "string" },
-                                        "name": { "type": "string" },
-                                        "description": { "type": "string" },
-                                        "tags": { "type": "array", "items": { "type": "string" } },
-                                        "examples": {
-                                            "type": "array",
-                                            "items": { "type": "string" }
-                                        },
-                                        "inputModes": {
-                                            "type": "array",
-                                            "items": { "type": "string" }
-                                        },
-                                        "outputModes": {
-                                            "type": "array",
-                                            "items": { "type": "string" }
-                                        }
-                                    }
-                                }
+                        "additionalProperties": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "agentCard": { "$ref": "#/$defs/agentCard" }
                             }
                         }
                     },

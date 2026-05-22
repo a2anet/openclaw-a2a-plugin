@@ -55,6 +55,7 @@ Follow the set up instructions in "📤 Sending Messages (outbound)" and/or "�
 
 - **Send messages to remote agents** — 6 outbound tools (`a2a_get_agents`, `a2a_get_agent`, `a2a_send_message`, `a2a_get_task`, `a2a_view_text_artifact`, `a2a_view_data_artifact`) for communicating with any A2A agent
 - **Receive messages from remote agents** — expose your OpenClaw agent as an A2A server with Agent Card discovery, JSON-RPC 2.0 endpoint, and SSE streaming
+- **Host multiple agents** — expose several agents from one gateway, each with its own `/a2a/<agentId>` endpoint, Agent Card discovery URL, and card metadata
 - **Send and receive files** — outbound messages can include local file paths (up to 1MB) or URLs; inbound files are saved locally
 - **Multi-turn conversations** — continue conversations across multiple messages using `context_id`
 - **Long-running task support** — if `a2a_send_message` times out, use `a2a_get_task` to monitor until the task reaches a terminal state
@@ -260,6 +261,60 @@ endpoint. Follow the steps below to make your agent reachable.
 | `agentCard.skills`      | `array`   | `[]`                                 | Skills to advertise. Each needs `id`, `name`, `description`. Optional: `tags`, `examples`, `inputModes`, `outputModes`. Can also be set at runtime with `a2a_update_agent_card`. |
 | `apiKeys`               | `array`   | —                                    | Array of `{ label, key }` objects for inbound auth.                                                                                                                              |
 | `allowUnauthenticated`  | `boolean` | `false`                              | Skip API key validation for inbound requests.                                                                                                                                    |
+| `agents`                | `object`  | —                                    | Named inbound agents, keyed by agent ID. Each value takes an `agentCard` (`name`, `description`, `skills`). See [Hosting Multiple Agents](#hosting-multiple-agents).             |
+
+#### Hosting Multiple Agents
+
+A single gateway can expose several agents, each as its own addressable A2A
+endpoint. Add `inbound.agents`, keyed by agent ID. Each key is both the URL
+path segment and the OpenClaw agent ID that handles the message, so a message
+to `/a2a/swe` is routed to the OpenClaw agent `swe`. The key must match a
+configured OpenClaw agent ID, or requests to it will fail to route.
+
+```json
+{
+    "plugins": {
+        "entries": {
+            "a2a": {
+                "enabled": true,
+                "config": {
+                    "inbound": {
+                        "apiKeys": [{ "label": "flynn", "key": "..." }],
+                        "agents": {
+                            "swe": {
+                                "agentCard": {
+                                    "name": "SWE",
+                                    "description": "Software engineering agent",
+                                    "skills": [
+                                        { "id": "code", "name": "Code", "description": "Writes and reviews code" }
+                                    ]
+                                }
+                            },
+                            "pmo": {
+                                "agentCard": { "name": "PMO", "description": "Project management agent" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+Each agent gets its own JSON-RPC endpoint and Agent Card discovery URL:
+
+| Agent | JSON-RPC endpoint | Agent Card discovery URL    |
+| ----- | ----------------- | --------------------------- |
+| `swe` | `/a2a/swe`        | `/a2a/swe/agent-card.json`  |
+| `pmo` | `/a2a/pmo`        | `/a2a/pmo/agent-card.json`  |
+
+The `apiKeys` / `allowUnauthenticated` settings apply to every agent on the
+host. Each agent can update its own card at runtime with `a2a_update_agent_card`
+— the edit is scoped to the calling agent and persisted under its
+`inbound.agents.<agentId>.agentCard`. When `inbound.agents` is omitted, a single
+agent is exposed on the default `/a2a` and `/.well-known/agent-card.json` paths,
+configured via `inbound.agentCard`.
 
 #### 2. Restart the Gateway
 
@@ -413,7 +468,8 @@ The `a2a_update_agent_card` tool is registered when inbound is configured
 
 Live-update this agent's A2A Agent Card name, description, or skills. Changes
 take effect immediately and persist to config — no restart needed. At least one
-field must be provided.
+field must be provided. When `inbound.agents` is configured, the edit is scoped
+to the calling agent's own card.
 
 | Parameter     | Type   | Required | Description                                                                                    |
 | ------------- | ------ | -------- | ---------------------------------------------------------------------------------------------- |
@@ -423,10 +479,12 @@ field must be provided.
 
 ## 🌐 HTTP Endpoints
 
-| Endpoint                       | Method | Auth         | Description                                                                                    |
-| ------------------------------ | ------ | ------------ | ---------------------------------------------------------------------------------------------- |
-| `/.well-known/agent-card.json` | GET    | No           | Returns the Agent Card for discovery                                                           |
-| `/a2a`                         | POST   | Bearer token | JSON-RPC 2.0 endpoint supporting `message/send`, `message/stream`, `tasks/get`, `tasks/cancel` |
+| Endpoint                          | Method | Auth         | Description                                                                                    |
+| --------------------------------- | ------ | ------------ | ---------------------------------------------------------------------------------------------- |
+| `/.well-known/agent-card.json`    | GET    | No           | Returns the Agent Card for discovery (single-agent configuration)                              |
+| `/a2a`                            | POST   | Bearer token | JSON-RPC 2.0 endpoint supporting `message/send`, `message/stream`, `tasks/get`, `tasks/cancel` |
+| `/a2a/<agentId>/agent-card.json`  | GET    | No           | Returns the Agent Card for `<agentId>` (when `inbound.agents` is configured)                   |
+| `/a2a/<agentId>`                  | POST   | Bearer token | JSON-RPC 2.0 endpoint for `<agentId>` (when `inbound.agents` is configured)                    |
 
 ### Supported JSON-RPC Methods
 
@@ -458,6 +516,10 @@ Tasks and file artifacts are saved locally, separated by direction. Task state l
 | Outbound  | Files | `<workspace>/a2a/outbound/files/` |
 | Inbound   | Tasks | `<state>/a2a/inbound/tasks/`      |
 | Inbound   | Files | `<workspace>/a2a/inbound/files/`  |
+
+When `inbound.agents` is configured, each agent's inbound tasks and files are
+isolated under its agent ID — `<state>/a2a/inbound/<agentId>/tasks/` and
+`<workspace>/a2a/inbound/<agentId>/files/`.
 
 Outbound task/file storage can be disabled with `outbound.taskStore: false` and `outbound.fileStore: false`.
 

@@ -8,14 +8,13 @@ import { AgentCardBuilder } from "../../src/inbound/agent-card.js";
 describe("AgentCardBuilder", () => {
     const baseParams = {
         openclawConfig: {},
-        pluginConfig: {},
         publicUrl: "https://example.com",
     };
 
-    test("uses inbound agentCard name when set", () => {
+    test("uses agentCard name when set", () => {
         const card = new AgentCardBuilder({
             ...baseParams,
-            pluginConfig: { inbound: { agentCard: { name: "Custom Name" } } },
+            agentCardConfig: { name: "Custom Name" },
         }).build();
         expect(card.name).toBe("Custom Name");
     });
@@ -76,6 +75,15 @@ describe("AgentCardBuilder", () => {
         expect(card.url).toBe("https://example.com/a2a");
     });
 
+    test("uses per-agent rpcPath for the endpoint URL", () => {
+        const card = new AgentCardBuilder({
+            ...baseParams,
+            agentId: "swe",
+            rpcPath: "/a2a/swe",
+        }).build();
+        expect(card.url).toBe("https://example.com/a2a/swe");
+    });
+
     test("sets protocol version and capabilities", () => {
         const card = new AgentCardBuilder(baseParams).build();
         expect(card.protocolVersion).toBe("0.3.0");
@@ -83,15 +91,11 @@ describe("AgentCardBuilder", () => {
         expect(card.capabilities?.pushNotifications).toBe(false);
     });
 
-    test("builds skills from inbound agentCard config", () => {
+    test("builds skills from agentCard config", () => {
         const card = new AgentCardBuilder({
             ...baseParams,
-            pluginConfig: {
-                inbound: {
-                    agentCard: {
-                        skills: [{ id: "chat", name: "Chat", description: "General chat" }],
-                    },
-                },
+            agentCardConfig: {
+                skills: [{ id: "chat", name: "Chat", description: "General chat" }],
             },
         }).build();
         expect(card.skills).toHaveLength(1);
@@ -103,12 +107,10 @@ describe("AgentCardBuilder", () => {
         expect(card.skills).toEqual([]);
     });
 
-    test("uses inbound agentCard description", () => {
+    test("uses agentCard description", () => {
         const card = new AgentCardBuilder({
             ...baseParams,
-            pluginConfig: {
-                inbound: { agentCard: { description: "My custom description" } },
-            },
+            agentCardConfig: { description: "My custom description" },
         }).build();
         expect(card.description).toBe("My custom description");
     });

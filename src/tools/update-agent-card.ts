@@ -11,6 +11,8 @@ import { type AgentTool, jsonResult } from "../types.js";
 export type UpdateAgentCardDeps = {
     loadConfig: () => Promise<Record<string, unknown>>;
     writeConfigFile: (config: Record<string, unknown>) => Promise<void>;
+    /** Wrap a card patch in the A2A config shape that persists it to this agent. */
+    buildConfigUpdate: (patch: Partial<A2AAgentCardConfig>) => Record<string, unknown>;
     /** Called after config is written to update the in-memory agent card. */
     updateLiveCard: (patch: Partial<A2AAgentCardConfig>) => void;
 };
@@ -73,15 +75,10 @@ export function createUpdateAgentCardTool(deps: UpdateAgentCardDeps): AgentTool 
             }
 
             try {
-                // Persist to config file under inbound.agentCard
                 const currentConfig = await deps.loadConfig();
                 await deps.writeConfigFile(
-                    buildRootConfigWithA2A(currentConfig, {
-                        inbound: { agentCard: patch },
-                    }),
+                    buildRootConfigWithA2A(currentConfig, deps.buildConfigUpdate(patch)),
                 );
-
-                // Update in-memory card
                 deps.updateLiveCard(patch);
 
                 const changes: string[] = [];

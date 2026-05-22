@@ -4,6 +4,8 @@
 
 export const VERSION = "0.1.3"; // x-release-please-version
 
+import * as path from "node:path";
+
 import type { AgentCard } from "@a2a-js/sdk";
 import { DefaultRequestHandler } from "@a2a-js/sdk/server";
 import { JSONTaskStore, LocalFileStore } from "@a2anet/a2a-utils";
@@ -21,12 +23,48 @@ import { AgentCardBuilder } from "./inbound/agent-card.js";
 import { generateApiKey } from "./inbound/auth.js";
 import { OpenClawExecutor } from "./inbound/executor.js";
 import { type A2AAuthConfig, A2AHttpHandlers } from "./inbound/http-adapter.js";
+import {
+    DEFAULT_INBOUND_AGENT_ID,
+    SINGLE_AGENT_CARD_PATH,
+    SINGLE_AGENT_RPC_PATH,
+    multiAgentCardPath,
+    multiAgentRpcPath,
+} from "./inbound/paths.js";
 import { createOutboundTools } from "./outbound/tools.js";
 import { createUpdateAgentCardTool } from "./tools/update-agent-card.js";
 import {
     assertUniqueA2AInboundKeyLabels,
     assertValidA2AInboundKeyLabel,
 } from "./utils/inbound-key-label.js";
+
+/**
+ * A single inbound agent's addressable endpoint: its JSON-RPC path, Agent Card
+ * discovery path, persistence locations, the card metadata it starts with, and
+ * how a card edit is persisted back to config.
+ */
+type InboundEndpoint = {
+    agentId: string;
+    rpcPath: string;
+    cardPath: string;
+    taskStorePath: string;
+    fileStorePath: string;
+    /** Card metadata from config; the starting point for {@link InboundEndpointRuntime.liveCardConfig}. */
+    initialCardConfig?: A2AAgentCardConfig;
+    /** Wrap a card patch in the root-config shape that persists it to this endpoint. */
+    buildConfigUpdate: (patch: Partial<A2AAgentCardConfig>) => Record<string, unknown>;
+};
+
+/** Lazily initialized runtime state for an {@link InboundEndpoint}. */
+type InboundEndpointRuntime = {
+    endpoint: InboundEndpoint;
+    /** Card metadata as currently served, including live edits from the update tool. */
+    liveCardConfig?: A2AAgentCardConfig;
+    agentCard: AgentCard | null;
+    /** Public base URL captured on first init; used to rebuild the card on live edits. */
+    publicUrl: string | null;
+    httpHandlers: A2AHttpHandlers | null;
+    initPromise: Promise<void> | null;
+};
 
 /**
  * Determine inbound auth configuration.
@@ -217,13 +255,80 @@ const a2aPlugin = definePluginEntry({
         const stateDir = api.runtime.state.resolveStateDir();
         const workspaceDir = api.config.agents?.defaults?.workspace ?? process.cwd();
 
-        // Shared state for the inbound server and the update-agent-card tool's
-        // `updateLiveCard` closure. In `tool-discovery` mode these stay at
-        // their initial values because the inbound init path is skipped.
-        let agentCard: AgentCard | null = null;
-        let httpHandlers: A2AHttpHandlers | null = null;
-        let initPromise: Promise<void> | null = null;
-        let livePluginConfig = { ...pluginConfig };
+        const inboundAgents = pluginConfig.inbound?.agents;
+        const isMultiAgentInbound = !!inboundAgents && Object.keys(inboundAgents).length > 0;
+
+        // One addressable endpoint per inbound agent, exposed on `/a2a/<agentId>`
+        // in multi-agent mode or the default `/a2a` paths otherwise. Their
+        // runtime state is lazily initialized on first request, so in
+        // `tool-discovery` mode they stay uninitialized.
+        const inboundEndpoints = resolveInboundEndpoints();
+        const endpointRuntimes = new Map<string, InboundEndpointRuntime>(
+            inboundEndpoints.map((endpoint) => [
+                endpoint.agentId,
+                {
+                    endpoint,
+                    liveCardConfig: endpoint.initialCardConfig,
+                    agentCard: null,
+                    publicUrl: null,
+                    httpHandlers: null,
+                    initPromise: null,
+                },
+            ]),
+        );
+
+        function resolveInboundEndpoints(): InboundEndpoint[] {
+            if (isMultiAgentInbound && inboundAgents) {
+                return Object.entries(inboundAgents).map(([agentId, agentEntry]) => ({
+                    agentId,
+                    rpcPath: multiAgentRpcPath(agentId),
+                    cardPath: multiAgentCardPath(agentId),
+                    taskStorePath: path.join(stateDir, "a2a", "inbound", agentId, "tasks"),
+                    fileStorePath: path.join(workspaceDir, "a2a", "inbound", agentId, "files"),
+                    initialCardConfig: agentEntry.agentCard,
+                    buildConfigUpdate: (patch) => ({
+                        inbound: { agents: { [agentId]: { agentCard: patch } } },
+                    }),
+                }));
+            }
+            return [
+                {
+                    agentId: DEFAULT_INBOUND_AGENT_ID,
+                    rpcPath: SINGLE_AGENT_RPC_PATH,
+                    cardPath: SINGLE_AGENT_CARD_PATH,
+                    taskStorePath: path.join(stateDir, "a2a", "inbound", "tasks"),
+                    fileStorePath: path.join(workspaceDir, "a2a", "inbound", "files"),
+                    initialCardConfig: pluginConfig.inbound?.agentCard,
+                    buildConfigUpdate: (patch) => ({ inbound: { agentCard: patch } }),
+                },
+            ];
+        }
+
+        function buildCardFor(runtime: InboundEndpointRuntime, publicUrl: string): AgentCard {
+            const { agentId, rpcPath } = runtime.endpoint;
+            return new AgentCardBuilder({
+                openclawConfig: api.config,
+                agentCardConfig: runtime.liveCardConfig,
+                agentId,
+                rpcPath,
+                publicUrl,
+                authRequired,
+            }).build();
+        }
+
+        // Apply a card edit from the update tool: update the served metadata and,
+        // if the endpoint is already initialized, rebuild its live Agent Card so
+        // discovery requests reflect the change immediately.
+        function applyCardPatch(
+            runtime: InboundEndpointRuntime,
+            patch: Partial<A2AAgentCardConfig>,
+        ): void {
+            runtime.liveCardConfig = { ...runtime.liveCardConfig, ...patch };
+            if (!runtime.agentCard || runtime.publicUrl === null) {
+                return;
+            }
+            Object.assign(runtime.agentCard, buildCardFor(runtime, runtime.publicUrl));
+        }
 
         // --- Outbound tools (via @a2anet/a2a-utils) ---
         const outbound = pluginConfig.outbound;
@@ -258,37 +363,32 @@ const a2aPlugin = definePluginEntry({
             (pluginConfig.inbound?.apiKeys && pluginConfig.inbound.apiKeys.length > 0);
 
         if (inboundConfigured) {
+            // In multi-agent mode the tool resolves to the calling agent's own
+            // card by its ID; in single-agent mode every caller shares the one
+            // endpoint.
             api.registerTool(
-                createUpdateAgentCardTool({
-                    loadConfig: async () =>
-                        api.runtime.config.loadConfig() as Record<string, unknown>,
-                    writeConfigFile: (cfg) =>
-                        api.runtime.config.writeConfigFile(
-                            cfg as import("openclaw/plugin-sdk").OpenClawConfig,
-                        ),
-                    updateLiveCard: (patch: Partial<A2AAgentCardConfig>) => {
-                        if (!agentCard) {
-                            return;
-                        }
-                        livePluginConfig = {
-                            ...livePluginConfig,
-                            inbound: {
-                                ...livePluginConfig.inbound,
-                                agentCard: {
-                                    ...livePluginConfig.inbound?.agentCard,
-                                    ...patch,
-                                },
-                            },
-                        };
-                        const rebuilt = new AgentCardBuilder({
-                            openclawConfig: api.config,
-                            pluginConfig: livePluginConfig,
-                            publicUrl: agentCard.url.replace(/\/a2a$/, ""),
-                            authRequired,
-                        }).build();
-                        Object.assign(agentCard, rebuilt);
-                    },
-                }),
+                (ctx) => {
+                    let runtime: InboundEndpointRuntime | undefined;
+                    if (isMultiAgentInbound) {
+                        runtime = ctx.agentId ? endpointRuntimes.get(ctx.agentId) : undefined;
+                    } else {
+                        runtime = endpointRuntimes.get(DEFAULT_INBOUND_AGENT_ID);
+                    }
+                    if (!runtime) {
+                        return null;
+                    }
+                    return createUpdateAgentCardTool({
+                        loadConfig: async () =>
+                            api.runtime.config.loadConfig() as Record<string, unknown>,
+                        writeConfigFile: (cfg) =>
+                            api.runtime.config.writeConfigFile(
+                                cfg as import("openclaw/plugin-sdk").OpenClawConfig,
+                            ),
+                        buildConfigUpdate: (patch) => runtime.endpoint.buildConfigUpdate(patch),
+                        updateLiveCard: (patch) => applyCardPatch(runtime, patch),
+                    });
+                },
+                { name: "a2a_update_agent_card" },
             );
         }
 
@@ -297,66 +397,94 @@ const a2aPlugin = definePluginEntry({
             return;
         }
 
+        // Each named inbound agent routes to the OpenClaw agent of the same ID.
+        // Warn (rather than fail) when one has no match, since requests to it
+        // would otherwise fail to route with no obvious cause. Match exactly,
+        // since routing and tool resolution key off the verbatim agent ID.
+        if (isMultiAgentInbound) {
+            if (pluginConfig.inbound?.agentCard) {
+                api.logger.warn(
+                    "[a2a] inbound.agentCard is ignored when inbound.agents is set; configure each agent's card under inbound.agents.<agentId>.agentCard.",
+                );
+            }
+
+            const knownAgentIds = new Set(
+                (api.config.agents?.list ?? [])
+                    .map((agent) => agent.id)
+                    .filter((id): id is string => typeof id === "string"),
+            );
+            // The gateway lowercases route paths when matching, so IDs differing
+            // only by case map to the same `/a2a/<id>` route and would misroute.
+            const canonicalIds = new Map<string, string>();
+            for (const endpoint of inboundEndpoints) {
+                if (!knownAgentIds.has(endpoint.agentId)) {
+                    api.logger.warn(
+                        `[a2a] Inbound agent "${endpoint.agentId}" does not match any configured OpenClaw agent; requests to ${endpoint.rpcPath} will fail to route.`,
+                    );
+                }
+                const canonical = endpoint.agentId.toLowerCase();
+                const collidesWith = canonicalIds.get(canonical);
+                if (collidesWith) {
+                    api.logger.warn(
+                        `[a2a] Inbound agents "${collidesWith}" and "${endpoint.agentId}" differ only by case; their ${endpoint.rpcPath} routes collide and requests will be misrouted.`,
+                    );
+                } else {
+                    canonicalIds.set(canonical, endpoint.agentId);
+                }
+            }
+        }
+
         // --- Inbound server ---
         const authConfig = resolveInboundAuth(pluginConfig, api.logger);
 
-        const initializeInbound = (publicUrl: string): Promise<void> => {
-            if (agentCard) {
+        const initializeEndpoint = (
+            runtime: InboundEndpointRuntime,
+            publicUrl: string,
+        ): Promise<void> => {
+            if (runtime.agentCard) {
                 return Promise.resolve();
             }
-            if (initPromise) {
-                return initPromise;
+            if (runtime.initPromise) {
+                return runtime.initPromise;
             }
-            initPromise = Promise.resolve()
+            const { agentId, rpcPath, taskStorePath, fileStorePath } = runtime.endpoint;
+            runtime.initPromise = Promise.resolve()
                 .then(() => {
-                    if (agentCard) {
+                    if (runtime.agentCard) {
                         return;
                     }
 
-                    agentCard = new AgentCardBuilder({
-                        openclawConfig: api.config,
-                        pluginConfig: livePluginConfig,
-                        publicUrl,
-                        authRequired,
-                    }).build();
+                    const card = buildCardFor(runtime, publicUrl);
 
-                    const taskStore = new JSONTaskStore(`${stateDir}/a2a/inbound/tasks`);
-                    const fileStore = new LocalFileStore(`${workspaceDir}/a2a/inbound/files`);
+                    const taskStore = new JSONTaskStore(taskStorePath);
+                    const fileStore = new LocalFileStore(fileStorePath);
                     const executor = new OpenClawExecutor({
-                        agentId: "main",
+                        agentId,
                         runtime: api.runtime,
                         config: api.config,
                         fileStore,
                         workspaceDir,
                     });
 
-                    const requestHandler = new DefaultRequestHandler(
-                        agentCard,
-                        taskStore,
-                        executor,
-                    );
-                    httpHandlers = new A2AHttpHandlers({
-                        agentCard,
-                        getAgentCard: (req) =>
-                            new AgentCardBuilder({
-                                openclawConfig: api.config,
-                                pluginConfig: livePluginConfig,
-                                publicUrl: resolveRequestPublicUrl(req),
-                                authRequired,
-                            }).build(),
+                    const requestHandler = new DefaultRequestHandler(card, taskStore, executor);
+                    runtime.httpHandlers = new A2AHttpHandlers({
+                        agentCard: card,
+                        getAgentCard: (req) => buildCardFor(runtime, resolveRequestPublicUrl(req)),
                         requestHandler,
                         auth: authConfig,
                     });
+                    runtime.publicUrl = publicUrl;
+                    runtime.agentCard = card;
 
                     api.logger.info(
-                        `[a2a] Inbound server initialized: ${agentCard.name} at ${publicUrl}`,
+                        `[a2a] Inbound server initialized: ${card.name} at ${publicUrl}${rpcPath}`,
                     );
                 })
                 .catch((err) => {
-                    initPromise = null;
+                    runtime.initPromise = null;
                     throw err;
                 });
-            return initPromise;
+            return runtime.initPromise;
         };
 
         function resolveRequestPublicUrl(req: import("node:http").IncomingMessage): string {
@@ -375,34 +503,60 @@ const a2aPlugin = definePluginEntry({
             return `${protocol}://${host}`;
         }
 
-        api.registerHttpRoute({
-            path: "/.well-known/agent-card.json",
-            auth: "plugin",
-            handler: async (req, res) => {
-                if (!httpHandlers) {
-                    await initializeInbound(resolveRequestPublicUrl(req));
+        const endpointHandler =
+            (
+                runtime: InboundEndpointRuntime,
+                dispatch: (
+                    handlers: A2AHttpHandlers,
+                    req: import("node:http").IncomingMessage,
+                    res: import("node:http").ServerResponse,
+                ) => Promise<void>,
+            ) =>
+            async (
+                req: import("node:http").IncomingMessage,
+                res: import("node:http").ServerResponse,
+            ): Promise<void> => {
+                if (!runtime.httpHandlers) {
+                    await initializeEndpoint(runtime, resolveRequestPublicUrl(req));
                 }
-                if (httpHandlers) {
-                    await httpHandlers.handleAgentCard(req, res);
+                if (runtime.httpHandlers) {
+                    await dispatch(runtime.httpHandlers, req, res);
                 }
-            },
-        });
+            };
 
-        api.registerHttpRoute({
-            path: "/a2a",
-            auth: "plugin",
-            handler: async (req, res) => {
-                if (!httpHandlers) {
-                    await initializeInbound(resolveRequestPublicUrl(req));
-                }
-                if (httpHandlers) {
-                    await httpHandlers.handleJsonRpc(req, res);
-                }
-            },
-        });
+        for (const runtime of endpointRuntimes.values()) {
+            api.registerHttpRoute({
+                path: runtime.endpoint.cardPath,
+                auth: "plugin",
+                handler: endpointHandler(runtime, (handlers, req, res) =>
+                    handlers.handleAgentCard(req, res),
+                ),
+            });
+
+            api.registerHttpRoute({
+                path: runtime.endpoint.rpcPath,
+                auth: "plugin",
+                handler: endpointHandler(runtime, (handlers, req, res) =>
+                    handlers.handleJsonRpc(req, res),
+                ),
+            });
+        }
 
         api.registerReload({
-            noopPrefixes: ["plugins.entries.a2a.config.inbound.agentCard"],
+            // Card-metadata edits are applied live, so they need no reload. Adding
+            // or removing agents under `inbound.agents` is deliberately not listed,
+            // so it still reloads to register or drop endpoints. In multi-agent
+            // mode `inbound.agentCard` is inert, so treat its edits as no-ops too
+            // rather than forcing a restart that changes nothing.
+            noopPrefixes: isMultiAgentInbound
+                ? [
+                      "plugins.entries.a2a.config.inbound.agentCard",
+                      ...inboundEndpoints.map(
+                          (endpoint) =>
+                              `plugins.entries.a2a.config.inbound.agents.${endpoint.agentId}.agentCard`,
+                      ),
+                  ]
+                : ["plugins.entries.a2a.config.inbound.agentCard"],
         });
 
         // --- Lifecycle service ---
@@ -413,9 +567,12 @@ const a2aPlugin = definePluginEntry({
             },
             stop: async () => {
                 api.logger.info("[a2a] A2A service stopped");
-                agentCard = null;
-                httpHandlers = null;
-                initPromise = null;
+                for (const runtime of endpointRuntimes.values()) {
+                    runtime.agentCard = null;
+                    runtime.publicUrl = null;
+                    runtime.httpHandlers = null;
+                    runtime.initPromise = null;
+                }
             },
         });
 

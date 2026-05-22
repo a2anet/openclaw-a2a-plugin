@@ -162,6 +162,74 @@ describe("parseA2APluginConfig", () => {
         ]);
     });
 
+    test("parses inbound agents with per-agent cards", () => {
+        const result = parseA2APluginConfig({
+            inbound: {
+                agents: {
+                    swe: {
+                        agentCard: {
+                            name: "SWE",
+                            description: "Software engineer",
+                            skills: [{ id: "code", name: "Code", description: "Writes code" }],
+                        },
+                    },
+                    pmo: { agentCard: { name: "PMO" } },
+                },
+            },
+        });
+        expect(result.inbound?.agents).toEqual({
+            swe: {
+                agentCard: {
+                    name: "SWE",
+                    description: "Software engineer",
+                    skills: [{ id: "code", name: "Code", description: "Writes code" }],
+                },
+            },
+            pmo: { agentCard: { name: "PMO" } },
+        });
+    });
+
+    test("keeps inbound agents with no agent card", () => {
+        const result = parseA2APluginConfig({
+            inbound: { agents: { ga: {} } },
+        });
+        expect(result.inbound?.agents).toEqual({ ga: {} });
+    });
+
+    test("skips inbound agents with slug-unsafe IDs", () => {
+        const result = parseA2APluginConfig({
+            inbound: {
+                agents: {
+                    swe: { agentCard: { name: "SWE" } },
+                    "bad id": { agentCard: { name: "Bad" } },
+                    "bad/id": { agentCard: { name: "Slash" } },
+                },
+            },
+        });
+        expect(result.inbound?.agents).toEqual({ swe: { agentCard: { name: "SWE" } } });
+    });
+
+    test("skips dot-only inbound agent IDs that would traverse paths", () => {
+        const result = parseA2APluginConfig({
+            inbound: {
+                agents: {
+                    ".": { agentCard: { name: "Dot" } },
+                    "..": { agentCard: { name: "DotDot" } },
+                    "a.b": { agentCard: { name: "OK" } },
+                },
+            },
+        });
+        expect(result.inbound?.agents).toEqual({ "a.b": { agentCard: { name: "OK" } } });
+    });
+
+    test("ignores inbound agents that are not an object", () => {
+        const result = parseA2APluginConfig({
+            inbound: { agents: [], allowUnauthenticated: true },
+        });
+        expect(result.inbound?.agents).toBeUndefined();
+        expect(result.inbound?.allowUnauthenticated).toBe(true);
+    });
+
     test("parses inbound auth config", () => {
         const result = parseA2APluginConfig({
             inbound: {

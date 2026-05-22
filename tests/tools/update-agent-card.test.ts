@@ -27,6 +27,7 @@ function makeDeps(existingConfig?: Record<string, unknown>) {
         writeConfigFile: mock(async (cfg: Record<string, unknown>) => {
             written = cfg;
         }),
+        buildConfigUpdate: mock((patch) => ({ inbound: { agentCard: patch } })),
         updateLiveCard: mock(() => {}),
         getWritten: () => written,
     };
@@ -150,5 +151,43 @@ describe("createUpdateAgentCardTool", () => {
         expect(agentCard.name).toBe("Updated");
         // apiKeys should be preserved via deep merge
         expect(inbound.apiKeys).toEqual([{ label: "alice", key: "abc" }]);
+    });
+
+    test("persists a per-agent card without clobbering siblings", async () => {
+        const deps = makeDeps({
+            plugins: {
+                entries: {
+                    a2a: {
+                        config: {
+                            inbound: {
+                                agents: {
+                                    swe: { agentCard: { name: "SWE", description: "keep me" } },
+                                    pmo: { agentCard: { name: "PMO" } },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        (deps.buildConfigUpdate as ReturnType<typeof mock>).mockImplementation((patch) => ({
+            inbound: { agents: { swe: { agentCard: patch } } },
+        }));
+        const tool = createUpdateAgentCardTool(deps);
+        await tool.execute("call-1", { name: "SWE v2" });
+
+        const written = deps.getWritten() as Record<string, unknown>;
+        const config = (
+            ((written.plugins as Record<string, unknown>).entries as Record<string, unknown>)
+                .a2a as Record<string, unknown>
+        ).config as Record<string, unknown>;
+        const agents = (config.inbound as Record<string, unknown>).agents as Record<
+            string,
+            { agentCard: Record<string, unknown> }
+        >;
+        // Target agent's name updated, its other card fields kept.
+        expect(agents.swe.agentCard).toEqual({ name: "SWE v2", description: "keep me" });
+        // Sibling agent untouched.
+        expect(agents.pmo.agentCard).toEqual({ name: "PMO" });
     });
 });

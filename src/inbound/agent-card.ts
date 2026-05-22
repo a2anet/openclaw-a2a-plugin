@@ -5,23 +5,30 @@
 import type { AgentCard, AgentSkill } from "@a2a-js/sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
-import type { A2AAgentCardConfig, A2APluginConfig, A2ASkillConfig } from "../config.js";
+import type { A2AAgentCardConfig, A2ASkillConfig } from "../config.js";
+import { DEFAULT_INBOUND_AGENT_ID, SINGLE_AGENT_RPC_PATH } from "./paths.js";
 
 export type BuildAgentCardParams = {
     openclawConfig: OpenClawConfig;
-    pluginConfig: A2APluginConfig;
     publicUrl: string;
     authRequired?: boolean;
+    /** OpenClaw agent ID this card represents (used for name resolution). */
     agentId?: string;
+    /** Agent Card metadata (name, description, skills) for this agent. */
+    agentCardConfig?: A2AAgentCardConfig;
+    /** Path the JSON-RPC endpoint is served on, appended to `publicUrl`. */
+    rpcPath?: string;
 };
 
 export class AgentCardBuilder {
     private readonly agentId: string;
     private readonly agentCardConfig?: A2AAgentCardConfig;
+    private readonly rpcPath: string;
 
     constructor(private readonly params: BuildAgentCardParams) {
-        this.agentId = params.agentId ?? "main";
-        this.agentCardConfig = params.pluginConfig.inbound?.agentCard;
+        this.agentId = params.agentId ?? DEFAULT_INBOUND_AGENT_ID;
+        this.agentCardConfig = params.agentCardConfig;
+        this.rpcPath = params.rpcPath ?? SINGLE_AGENT_RPC_PATH;
     }
 
     build(): AgentCard {
@@ -37,7 +44,7 @@ export class AgentCardBuilder {
             description,
             protocolVersion: "0.3.0",
             version: "1.0.0",
-            url: `${baseUrl}/a2a`,
+            url: `${baseUrl}${this.rpcPath}`,
             capabilities: {
                 streaming: true,
                 pushNotifications: false,

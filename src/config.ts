@@ -31,6 +31,10 @@ export type A2AAgentCardConfig = {
     skills?: A2ASkillConfig[];
 };
 
+export type A2AInboundAgentConfig = {
+    agentCard?: A2AAgentCardConfig;
+};
+
 export type A2AOutboundConfig = {
     agents?: Record<string, A2AAgentEntry>;
     taskStore?: boolean;
@@ -48,6 +52,7 @@ export type A2AInboundConfig = {
     agentCard?: A2AAgentCardConfig;
     allowUnauthenticated?: boolean;
     apiKeys?: A2AInboundKey[];
+    agents?: Record<string, A2AInboundAgentConfig>;
 };
 
 export type A2APluginConfig = {
@@ -183,6 +188,33 @@ function parseAgentCard(value: unknown): A2AAgentCardConfig | undefined {
     };
 }
 
+/**
+ * Inbound agent IDs become URL path segments and filesystem path components, so
+ * they must be slug-safe. The leading `(?!\.+$)` rejects dot-only IDs like `.`
+ * and `..`, which would otherwise traverse paths.
+ */
+const INBOUND_AGENT_ID_PATTERN = /^(?!\.+$)[A-Za-z0-9._-]{1,64}$/;
+
+function parseInboundAgents(value: unknown): Record<string, A2AInboundAgentConfig> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const raw = value as Record<string, unknown>;
+    const result: Record<string, A2AInboundAgentConfig> = {};
+    for (const [id, entry] of Object.entries(raw)) {
+        const agentId = id.trim();
+        if (!INBOUND_AGENT_ID_PATTERN.test(agentId)) {
+            continue;
+        }
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            continue;
+        }
+        const agentCard = parseAgentCard((entry as Record<string, unknown>).agentCard);
+        result[agentId] = agentCard ? { agentCard } : {};
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function parseOutbound(value: unknown): A2AOutboundConfig | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return undefined;
@@ -226,14 +258,21 @@ function parseInbound(value: unknown): A2AInboundConfig | undefined {
     const allowUnauthenticated =
         typeof raw.allowUnauthenticated === "boolean" ? raw.allowUnauthenticated : undefined;
     const apiKeys = parseApiKeys(raw.apiKeys);
+    const agents = parseInboundAgents(raw.agents);
 
-    if (agentCard === undefined && allowUnauthenticated === undefined && apiKeys === undefined) {
+    if (
+        agentCard === undefined &&
+        allowUnauthenticated === undefined &&
+        apiKeys === undefined &&
+        agents === undefined
+    ) {
         return undefined;
     }
     return {
         ...(agentCard ? { agentCard } : {}),
         ...(allowUnauthenticated !== undefined ? { allowUnauthenticated } : {}),
         ...(apiKeys ? { apiKeys } : {}),
+        ...(agents ? { agents } : {}),
     };
 }
 
@@ -268,6 +307,31 @@ export function extractA2AEntry(rootConfig: Record<string, unknown>): {
     return { pluginsEntries, a2aEntry, a2aConfig };
 }
 
+/** Merge a per-agent card update into the existing `inbound.agents` map. */
+function mergeInboundAgents(
+    existing: Record<string, unknown>,
+    update: Record<string, unknown>,
+): Record<string, unknown> {
+    const merged: Record<string, unknown> = { ...existing };
+    for (const [id, entry] of Object.entries(update)) {
+        const existingEntry = (existing[id] as Record<string, unknown> | undefined) ?? {};
+        const nextEntry = entry as Record<string, unknown>;
+        merged[id] = {
+            ...existingEntry,
+            ...nextEntry,
+            ...(existingEntry.agentCard && nextEntry.agentCard
+                ? {
+                      agentCard: {
+                          ...(existingEntry.agentCard as Record<string, unknown>),
+                          ...(nextEntry.agentCard as Record<string, unknown>),
+                      },
+                  }
+                : {}),
+        };
+    }
+    return merged;
+}
+
 /**
  * Build a new root config with updated A2A plugin config merged in.
  * Performs a deep merge on the `inbound` key to preserve sibling fields
@@ -299,6 +363,18 @@ export function buildRootConfigWithA2A(
                     ...(existingInbound.agentCard as Record<string, unknown>),
                     ...(nextInbound.agentCard as Record<string, unknown>),
                 },
+            };
+        }
+
+        // Per-agent edits target one agent's card, so merge by agent ID to keep
+        // sibling agents and the target's other card fields intact.
+        if (existingInbound.agents && nextInbound.agents) {
+            mergedInbound = {
+                ...mergedInbound,
+                agents: mergeInboundAgents(
+                    existingInbound.agents as Record<string, unknown>,
+                    nextInbound.agents as Record<string, unknown>,
+                ),
             };
         }
 
