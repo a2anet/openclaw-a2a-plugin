@@ -9,7 +9,15 @@
 // the gateway, and waits for the configured readiness path to come up.
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    readdirSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -22,42 +30,48 @@ type SharedTooling = {
 };
 
 let sharedToolingPromise: Promise<SharedTooling> | undefined;
-const sharedTmpDirs: string[] = [];
-let exitHookRegistered = false;
+let orphanCleanupDone = false;
 
-function registerExitCleanup(): void {
-    if (exitHookRegistered) return;
-    exitHookRegistered = true;
-    const cleanup = () => {
-        for (const dir of sharedTmpDirs.splice(0)) {
+/**
+ * Wipe leftover e2e temp dirs from previous (possibly crashed) runs.
+ *
+ * Bun's test runner does not invoke `process.on("exit"/"beforeExit")` handlers,
+ * so we cannot reliably clean up at the end of a run. Each `openclaw-install-*`
+ * dir is ~500MB; left unattended they fill the disk. Cleaning at startup is
+ * the simplest robust strategy: every run begins with a clean slate, and a
+ * crash mid-run is repaired on the next invocation.
+ */
+function cleanupOrphanedTempDirs(): void {
+    if (orphanCleanupDone) return;
+    orphanCleanupDone = true;
+    const dir = tmpdir();
+    let entries: string[];
+    try {
+        entries = readdirSync(dir);
+    } catch {
+        return;
+    }
+    for (const name of entries) {
+        if (/^openclaw-(install|plugin-pack|e2e)-/.test(name)) {
             try {
-                rmSync(dir, { recursive: true, force: true });
+                rmSync(join(dir, name), { recursive: true, force: true });
             } catch {
-                // Best-effort cleanup; the OS will reap tmpdir entries eventually.
+                // Best-effort; OS will reap tmpdir eventually.
             }
         }
-    };
-    process.on("exit", cleanup);
-    process.on("SIGINT", () => {
-        cleanup();
-        process.exit(130);
-    });
-    process.on("SIGTERM", () => {
-        cleanup();
-        process.exit(143);
-    });
+    }
 }
 
 /**
  * Install `openclaw@latest` and pack the plugin, exactly once per Bun process.
- * Subsequent callers receive the cached paths. Temp dirs are cleaned up
- * automatically on process exit.
+ * Subsequent callers receive the cached paths. Orphaned temp dirs from prior
+ * runs are wiped at the start of the first call.
  */
 export function getSharedTooling(): Promise<SharedTooling> {
     if (sharedToolingPromise) {
         return sharedToolingPromise;
     }
-    registerExitCleanup();
+    cleanupOrphanedTempDirs();
     sharedToolingPromise = (async () => {
         // Build the plugin so dist/ is up to date — openclaw loads from dist/.
         const build = spawnSync("bun", ["run", "build"], {
@@ -69,7 +83,6 @@ export function getSharedTooling(): Promise<SharedTooling> {
         }
 
         const installRoot = mkdtempSync(join(tmpdir(), "openclaw-install-"));
-        sharedTmpDirs.push(installRoot);
 
         const install = spawnSync(
             "npm",
@@ -87,7 +100,6 @@ export function getSharedTooling(): Promise<SharedTooling> {
         // Pack the plugin to a tarball — installing from the source dir lets
         // the plugin's devDependency on openclaw shadow openclaw's peer link.
         const packDir = mkdtempSync(join(tmpdir(), "openclaw-plugin-pack-"));
-        sharedTmpDirs.push(packDir);
         const pack = spawnSync(
             "npm",
             ["pack", PLUGIN_ROOT, "--pack-destination", packDir, "--silent"],
