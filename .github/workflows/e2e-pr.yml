@@ -1,0 +1,36 @@
+name: E2E (pull request, manual approval)
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: E2E against openclaw@latest
+    runs-on: ubuntu-latest
+    # Gates the job on a required reviewer for the `e2e-manual` environment.
+    # The environment must be created in repo Settings → Environments with
+    # at least one required reviewer; otherwise this job runs without a gate.
+    environment: e2e-manual
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run e2e tests
+        env:
+          RUN_E2E: "1"
+        run: bun test tests/e2e
