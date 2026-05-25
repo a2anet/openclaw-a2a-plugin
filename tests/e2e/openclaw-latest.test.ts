@@ -18,12 +18,14 @@ import { type Gateway, postJsonRpc, startGateway } from "./helpers.js";
 const RUN = process.env.RUN_E2E === "1";
 const describeE2E = RUN ? describe : describe.skip;
 
+const PORT = 18789;
+
 describeE2E("openclaw@latest + plugin — single-agent inbound (unauthenticated)", () => {
     let gateway: Gateway;
 
     beforeAll(async () => {
         gateway = await startGateway({
-            port: 18789,
+            port: PORT,
             pluginConfig: {
                 inbound: {
                     allowUnauthenticated: true,
@@ -40,17 +42,62 @@ describeE2E("openclaw@latest + plugin — single-agent inbound (unauthenticated)
         await gateway?.stop();
     }, 30_000);
 
-    test("GET /.well-known/agent-card.json returns a well-formed Agent Card", async () => {
+    test("GET /.well-known/agent-card.json returns a well-formed Agent Card with url pointing at /a2a", async () => {
         const res = await fetch(`${gateway.base}/.well-known/agent-card.json`);
         expect(res.status).toBe(200);
         const card = (await res.json()) as Record<string, unknown>;
         expect(typeof card.name).toBe("string");
         expect(typeof card.description).toBe("string");
-        expect(typeof card.url).toBe("string");
+        expect(card.url).toBe(`http://127.0.0.1:${PORT}/a2a`);
         expect(typeof card.version).toBe("string");
         expect(card.capabilities).toBeDefined();
         expect(Array.isArray(card.skills)).toBe(true);
     });
+
+    // The contract we want clients to be able to rely on: discover the agent
+    // by fetching its card, then send messages to the `url` field as-is — no
+    // path rewriting on the client side. This test proves that contract by
+    // routing a `message/send` through whatever the card claims its URL is.
+    test("message/send addressed to the URL from the Agent Card reaches the agent", async () => {
+        const cardRes = await fetch(`${gateway.base}/.well-known/agent-card.json`);
+        const card = (await cardRes.json()) as { url?: string };
+        expect(typeof card.url).toBe("string");
+        const rpcUrl = card.url as string;
+
+        const res = await fetch(rpcUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: "card-driven-1",
+                method: "message/send",
+                params: {
+                    message: {
+                        messageId: crypto.randomUUID(),
+                        role: "user",
+                        parts: [{ kind: "text", text: "ping" }],
+                    },
+                },
+            }),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+            jsonrpc?: string;
+            id?: string;
+            result?: { kind?: string };
+            error?: unknown;
+        };
+        expect(body.jsonrpc).toBe("2.0");
+        expect(body.id).toBe("card-driven-1");
+        // No LLM in the test env, so the lane settles either as a task
+        // (which would then fail) or surfaces an error. Either is a valid
+        // envelope.
+        if (body.result) {
+            expect(["task", "message"]).toContain(body.result.kind);
+        } else {
+            expect(body.error).toBeDefined();
+        }
+    }, 30_000);
 
     test("POST /a2a rejects malformed JSON with a JSON-RPC parse error", async () => {
         const res = await fetch(`${gateway.base}/a2a`, {
