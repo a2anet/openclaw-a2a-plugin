@@ -13,13 +13,15 @@ import { type Gateway, startGateway } from "./helpers.js";
 const RUN = process.env.RUN_E2E === "1";
 const describeE2E = RUN ? describe : describe.skip;
 
+const PORT = 18791;
+
 describeE2E("openclaw@latest + plugin — single-agent inbound (API key auth)", () => {
     const apiKey = "e2e-test-key-OVuU9p7eC0fMRGAh";
     let gateway: Gateway;
 
     beforeAll(async () => {
         gateway = await startGateway({
-            port: 18791,
+            port: PORT,
             pluginConfig: {
                 inbound: {
                     agentCard: {
@@ -69,6 +71,55 @@ describeE2E("openclaw@latest + plugin — single-agent inbound (API key auth)", 
         });
         expect(res.status).toBe(401);
     });
+
+    // Under auth, the Agent Card stays publicly readable so clients can
+    // discover that auth is required and which scheme to use. If we ever
+    // accidentally gate the card endpoint behind auth, discovery breaks.
+    test("GET /.well-known/agent-card.json is reachable without Authorization", async () => {
+        const res = await fetch(`${gateway.base}/.well-known/agent-card.json`);
+        expect(res.status).toBe(200);
+        const card = (await res.json()) as Record<string, unknown>;
+        expect(card.url).toBe(`http://127.0.0.1:${PORT}/a2a`);
+        // The card must advertise the API-key scheme so SDK clients know
+        // to attach `Authorization: Bearer <key>` to their RPC calls.
+        const schemes = card.securitySchemes as Record<string, { type?: string }> | undefined;
+        expect(schemes?.a2aApiKey?.type).toBe("apiKey");
+        expect(Array.isArray(card.security)).toBe(true);
+    });
+
+    // End-to-end discovery contract under auth: fetch the card publicly,
+    // send `message/send` to whatever URL the card claims, with a valid
+    // bearer token. This is the flow a real A2A client would follow.
+    test("card-driven round-trip: discover publicly, then call with Bearer auth", async () => {
+        const cardRes = await fetch(`${gateway.base}/.well-known/agent-card.json`);
+        expect(cardRes.status).toBe(200);
+        const card = (await cardRes.json()) as { url?: string };
+        const rpcUrl = card.url as string;
+
+        const res = await fetch(rpcUrl, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: "auth-card-driven-1",
+                method: "tasks/get",
+                params: { id: "does-not-exist" },
+            }),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+            jsonrpc?: string;
+            id?: string;
+            error?: unknown;
+            result?: unknown;
+        };
+        expect(body.jsonrpc).toBe("2.0");
+        expect(body.id).toBe("auth-card-driven-1");
+        expect(body.error !== undefined || body.result !== undefined).toBe(true);
+    }, 30_000);
 
     test("POST /a2a with a valid Bearer key is accepted", async () => {
         const res = await fetch(`${gateway.base}/a2a`, {
