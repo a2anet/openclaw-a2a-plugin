@@ -18,7 +18,8 @@
         "check:fix": "biome check --write .",
         "typecheck": "tsc --noEmit",
         "test": "bun test",
-        "test:coverage": "bun test --coverage"
+        "test:coverage": "bun test --coverage",
+        "test:e2e": "RUN_E2E=1 bun test tests/e2e"
     },
     "openclaw": {
         "extensions": ["./dist/index.js"],
