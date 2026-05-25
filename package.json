@@ -1,6 +1,6 @@
 {
     "name": "@a2anet/openclaw-a2a-plugin",
-    "version": "0.1.4",
+    "version": "0.2.0",
     "description": "A2A protocol plugin for OpenClaw. Send messages to remote A2A agents and allow others to connect to your agent.",
     "type": "module",
     "exports": {
@@ -11,7 +11,10 @@
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
-    "files": ["dist", "openclaw.plugin.json"],
+    "files": [
+        "dist",
+        "openclaw.plugin.json"
+    ],
     "scripts": {
         "build": "tsc",
         "check": "biome check .",
@@ -22,7 +25,9 @@
         "test:e2e": "RUN_E2E=1 bun test tests/e2e"
     },
     "openclaw": {
-        "extensions": ["./dist/index.js"],
+        "extensions": [
+            "./dist/index.js"
+        ],
         "compat": {
             "pluginApi": ">=2026.4.8",
             "minGatewayVersion": "2026.4.8"
@@ -32,7 +37,12 @@
             "pluginSdkVersion": "2026.4.8"
         }
     },
-    "keywords": ["a2a", "agent-to-agent", "openclaw", "plugin"],
+    "keywords": [
+        "a2a",
+        "agent-to-agent",
+        "openclaw",
+        "plugin"
+    ],
     "author": "A2A Net <hello@a2anet.com>",
     "license": "Apache-2.0",
     "repository": {
@@ -61,5 +71,7 @@
         "openclaw": "^2026.4.8",
         "typescript": "^5.7.0"
     },
-    "trustedDependencies": ["@biomejs/biome"]
+    "trustedDependencies": [
+        "@biomejs/biome"
+    ]
 }

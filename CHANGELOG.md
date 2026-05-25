@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/a2anet/openclaw-a2a-plugin/compare/openclaw-a2a-plugin-v0.1.4...openclaw-a2a-plugin-v0.2.0) (2026-05-25)
+
+
+### Features
+
+* host multi-agent inbound endpoints and add nightly e2e suite ([c534e3d](https://github.com/a2anet/openclaw-a2a-plugin/commit/c534e3d09b2c89f0c66cba336c2a59e24ee80e7f))
+
 ## [0.1.4](https://github.com/a2anet/openclaw-a2a-plugin/compare/openclaw-a2a-plugin-v0.1.3...openclaw-a2a-plugin-v0.1.4) (2026-05-20)
 
 
