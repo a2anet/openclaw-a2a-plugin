@@ -1,5 +1,8 @@
 {
     "id": "a2a",
+    "activation": {
+        "onStartup": true
+    },
     "contracts": {
         "tools": [
             "a2a_get_agents",
