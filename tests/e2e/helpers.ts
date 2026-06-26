@@ -32,6 +32,12 @@ type SharedTooling = {
 let sharedToolingPromise: Promise<SharedTooling> | undefined;
 let orphanCleanupDone = false;
 
+function openclawProcessEnv(home: string): NodeJS.ProcessEnv {
+    const env = { ...process.env, OPENCLAW_HOME: home };
+    env.OPENCLAW_VERSION = undefined;
+    return env;
+}
+
 /**
  * Wipe leftover e2e temp dirs from previous (possibly crashed) runs.
  *
@@ -160,7 +166,7 @@ export async function startGateway(config: GatewayConfig): Promise<Gateway> {
     writeFileSync(configPath, JSON.stringify({ gateway: gatewayBase }, null, 2));
 
     const pluginInstall = spawnSync(openclawBin, ["plugins", "install", tarballPath], {
-        env: { ...process.env, OPENCLAW_HOME: home },
+        env: openclawProcessEnv(home),
         stdio: "inherit",
     });
     if (pluginInstall.status !== 0) {
@@ -188,7 +194,7 @@ export async function startGateway(config: GatewayConfig): Promise<Gateway> {
 
     const logs: string[] = [];
     const proc = spawn(openclawBin, ["gateway", "--port", String(config.port)], {
-        env: { ...process.env, OPENCLAW_HOME: home },
+        env: openclawProcessEnv(home),
         stdio: ["ignore", "pipe", "pipe"],
     });
     proc.stdout?.on("data", (d: Buffer) => {
