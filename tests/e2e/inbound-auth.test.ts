@@ -13,7 +13,7 @@ import { type Gateway, startGateway } from "./helpers.js";
 const RUN = process.env.RUN_E2E === "1";
 const describeE2E = RUN ? describe : describe.skip;
 
-const PORT = 19872;
+const PORT = 18791;
 
 describeE2E("openclaw@latest + plugin — single-agent inbound (API key auth)", () => {
     const apiKey = "e2e-test-key-OVuU9p7eC0fMRGAh";

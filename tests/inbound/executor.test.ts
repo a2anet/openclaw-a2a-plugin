@@ -147,7 +147,7 @@ describe("OpenClawExecutor", () => {
             MessageThreadId: "ctx-1",
             ParentSessionKey: "agent:main:a2a:direct:anonymous",
         });
-    }, 15_000);
+    });
 
     test("publishes error message for empty text", async () => {
         const runtime = makeRuntime();
