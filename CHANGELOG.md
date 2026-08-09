@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/a2anet/openclaw-a2a-plugin/compare/openclaw-a2a-plugin-v0.2.0...openclaw-a2a-plugin-v0.2.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **e2e:** stop leaking OPENCLAW_VERSION into gateway processes ([519b0af](https://github.com/a2anet/openclaw-a2a-plugin/commit/519b0af58ed7ae3dff56851887fcb08799d74387))
+* **e2e:** stop leaking OPENCLAW_VERSION into gateway processes ([1daec53](https://github.com/a2anet/openclaw-a2a-plugin/commit/1daec53aa039871a9602a9ef237703ee7ea7bdc4))
+
 ## [0.2.0](https://github.com/a2anet/openclaw-a2a-plugin/compare/openclaw-a2a-plugin-v0.1.4...openclaw-a2a-plugin-v0.2.0) (2026-05-25)
 
 
