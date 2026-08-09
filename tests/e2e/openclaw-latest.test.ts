@@ -18,7 +18,9 @@ import { type Gateway, postJsonRpc, startGateway } from "./helpers.js";
 const RUN = process.env.RUN_E2E === "1";
 const describeE2E = RUN ? describe : describe.skip;
 
-const PORT = 18789;
+// High port range avoids colliding with a developer's local openclaw gateway
+// (default is often 18789).
+const PORT = 19871;
 
 describeE2E("openclaw@latest + plugin — single-agent inbound (unauthenticated)", () => {
     let gateway: Gateway;

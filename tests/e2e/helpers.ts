@@ -24,6 +24,22 @@ import { join, resolve } from "node:path";
 export const PLUGIN_ROOT = resolve(import.meta.dir, "..", "..");
 export const OPENCLAW_VERSION = process.env.OPENCLAW_VERSION ?? "latest";
 
+/**
+ * Env for spawned `openclaw` processes.
+ *
+ * Our suite uses `OPENCLAW_VERSION` to pick which npm dist-tag/version to
+ * install. OpenClaw itself also reads that variable as the host version for
+ * plugin API compatibility checks — and when discovery passes a copied env
+ * object it prefers the env value over the package version. Passing
+ * `OPENCLAW_VERSION=latest` therefore makes the gateway report host `latest`,
+ * fail `>=2026.4.8`, and skip loading the plugin. Strip it from children.
+ */
+function openclawChildEnv(home: string): NodeJS.ProcessEnv {
+    const env = { ...process.env, OPENCLAW_HOME: home };
+    env.OPENCLAW_VERSION = undefined;
+    return env;
+}
+
 type SharedTooling = {
     openclawBin: string;
     tarballPath: string;
@@ -131,8 +147,7 @@ export type GatewayConfig = {
      * up before plugins finish loading). Defaults to `/.well-known/agent-card.json`
      * (single-agent inbound). For multi-agent, pass one of the per-agent paths
      * such as `/a2a/<agentId>/agent-card.json`. For outbound-only configs, set
-     * `readinessPath: null` to skip the wait — the helper polls a TCP connection
-     * instead.
+     * `readinessPath: null` to poll `/healthz` instead.
      */
     readinessPath?: string | null;
 };
@@ -160,7 +175,7 @@ export async function startGateway(config: GatewayConfig): Promise<Gateway> {
     writeFileSync(configPath, JSON.stringify({ gateway: gatewayBase }, null, 2));
 
     const pluginInstall = spawnSync(openclawBin, ["plugins", "install", tarballPath], {
-        env: { ...process.env, OPENCLAW_HOME: home },
+        env: openclawChildEnv(home),
         stdio: "inherit",
     });
     if (pluginInstall.status !== 0) {
@@ -188,7 +203,7 @@ export async function startGateway(config: GatewayConfig): Promise<Gateway> {
 
     const logs: string[] = [];
     const proc = spawn(openclawBin, ["gateway", "--port", String(config.port)], {
-        env: { ...process.env, OPENCLAW_HOME: home },
+        env: openclawChildEnv(home),
         stdio: ["ignore", "pipe", "pipe"],
     });
     proc.stdout?.on("data", (d: Buffer) => {
@@ -204,7 +219,17 @@ export async function startGateway(config: GatewayConfig): Promise<Gateway> {
     const deadline = Date.now() + 60_000;
     let lastStatus: number | string = "no-response";
     let ready = false;
+    let exitCode: number | null = null;
+    proc.once("exit", (code) => {
+        exitCode = code;
+    });
     while (Date.now() < deadline) {
+        if (exitCode !== null) {
+            const tail = logs.join("").split("\n").slice(-40).join("\n");
+            throw new Error(
+                `gateway on port ${config.port} exited before becoming ready (code ${exitCode})\n--- gateway logs (tail) ---\n${tail}`,
+            );
+        }
         if (readinessPath === null) {
             try {
                 const r = await fetch(`${base}/healthz`).catch(() => fetch(`${base}/`));
@@ -218,9 +243,10 @@ export async function startGateway(config: GatewayConfig): Promise<Gateway> {
             try {
                 const r = await fetch(`${base}${readinessPath}`);
                 lastStatus = r.status;
-                // 200 means served; 401/403 means the plugin's route is registered
-                // but auth is rejecting us — that's also "ready" for our purposes.
-                if (r.status === 200 || r.status === 401 || r.status === 403) {
+                // Agent Card / discovery paths are public; 200 means the plugin
+                // registered its routes. Do not treat 401/403 as ready — that can
+                // match an unrelated gateway already bound to the port.
+                if (r.status === 200) {
                     ready = true;
                     break;
                 }

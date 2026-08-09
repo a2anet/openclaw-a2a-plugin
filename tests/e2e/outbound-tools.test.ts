@@ -27,7 +27,7 @@ type ToolInvokeResult = {
 };
 
 describeE2E("openclaw@latest + plugin — outbound tools via /tools/invoke (self-loop)", () => {
-    const port = 18792;
+    const port = 19874;
     let gateway: Gateway;
 
     beforeAll(async () => {

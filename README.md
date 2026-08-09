@@ -2,7 +2,7 @@
 
 ![OpenClaw A2A Plugin](images/openclaw-a2a-plugin-banner.png)
 
-[![npm version](https://img.shields.io/npm/v/@a2anet/openclaw-a2a-plugin.svg)](https://www.npmjs.com/package/@a2anet/openclaw-a2a-plugin) [![License](https://img.shields.io/github/license/a2anet/openclaw-a2a-plugin)](https://github.com/a2anet/openclaw-a2a-plugin/blob/main/LICENSE) [![A2A Protocol](https://img.shields.io/badge/A2A-Protocol-blue)](https://a2a-protocol.org) [![Discord](https://img.shields.io/discord/1391916121589944320?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/674NGXpAjU)
+[![npm version](https://img.shields.io/npm/v/@a2anet/openclaw-a2a-plugin.svg)](https://www.npmjs.com/package/@a2anet/openclaw-a2a-plugin) [![npm Downloads](https://img.shields.io/npm/dm/@a2anet/openclaw-a2a-plugin.svg)](https://www.npmjs.com/package/@a2anet/openclaw-a2a-plugin) [![License](https://img.shields.io/github/license/a2anet/openclaw-a2a-plugin)](https://github.com/a2anet/openclaw-a2a-plugin/blob/main/LICENSE) [![A2A Protocol](https://img.shields.io/badge/A2A-Protocol-blue)](https://a2a-protocol.org) [![Discord](https://img.shields.io/discord/1391916121589944320?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/674NGXpAjU)
 
 [OpenClaw](https://openclaw.ai) [A2A protocol](https://a2a-project.org/) community plugin.
 Send messages and files to other agents over the internet, and/or allow your agent to receive messages and files with Tailscale.
@@ -286,12 +286,19 @@ configured OpenClaw agent ID, or requests to it will fail to route.
                                     "name": "SWE",
                                     "description": "Software engineering agent",
                                     "skills": [
-                                        { "id": "code", "name": "Code", "description": "Writes and reviews code" }
+                                        {
+                                            "id": "code",
+                                            "name": "Code",
+                                            "description": "Writes and reviews code"
+                                        }
                                     ]
                                 }
                             },
                             "pmo": {
-                                "agentCard": { "name": "PMO", "description": "Project management agent" }
+                                "agentCard": {
+                                    "name": "PMO",
+                                    "description": "Project management agent"
+                                }
                             }
                         }
                     }
@@ -304,10 +311,10 @@ configured OpenClaw agent ID, or requests to it will fail to route.
 
 Each agent gets its own JSON-RPC endpoint and Agent Card discovery URL:
 
-| Agent | JSON-RPC endpoint | Agent Card discovery URL    |
-| ----- | ----------------- | --------------------------- |
-| `swe` | `/a2a/swe`        | `/a2a/swe/agent-card.json`  |
-| `pmo` | `/a2a/pmo`        | `/a2a/pmo/agent-card.json`  |
+| Agent | JSON-RPC endpoint | Agent Card discovery URL   |
+| ----- | ----------------- | -------------------------- |
+| `swe` | `/a2a/swe`        | `/a2a/swe/agent-card.json` |
+| `pmo` | `/a2a/pmo`        | `/a2a/pmo/agent-card.json` |
 
 The `apiKeys` / `allowUnauthenticated` settings apply to every agent on the
 host. Each agent can update its own card at runtime with `a2a_update_agent_card`
@@ -479,12 +486,12 @@ to the calling agent's own card.
 
 ## 🌐 HTTP Endpoints
 
-| Endpoint                          | Method | Auth         | Description                                                                                    |
-| --------------------------------- | ------ | ------------ | ---------------------------------------------------------------------------------------------- |
-| `/.well-known/agent-card.json`    | GET    | No           | Returns the Agent Card for discovery (single-agent configuration)                              |
-| `/a2a`                            | POST   | Bearer token | JSON-RPC 2.0 endpoint supporting `message/send`, `message/stream`, `tasks/get`, `tasks/cancel` |
-| `/a2a/<agentId>/agent-card.json`  | GET    | No           | Returns the Agent Card for `<agentId>` (when `inbound.agents` is configured)                   |
-| `/a2a/<agentId>`                  | POST   | Bearer token | JSON-RPC 2.0 endpoint for `<agentId>` (when `inbound.agents` is configured)                    |
+| Endpoint                         | Method | Auth         | Description                                                                                    |
+| -------------------------------- | ------ | ------------ | ---------------------------------------------------------------------------------------------- |
+| `/.well-known/agent-card.json`   | GET    | No           | Returns the Agent Card for discovery (single-agent configuration)                              |
+| `/a2a`                           | POST   | Bearer token | JSON-RPC 2.0 endpoint supporting `message/send`, `message/stream`, `tasks/get`, `tasks/cancel` |
+| `/a2a/<agentId>/agent-card.json` | GET    | No           | Returns the Agent Card for `<agentId>` (when `inbound.agents` is configured)                   |
+| `/a2a/<agentId>`                 | POST   | Bearer token | JSON-RPC 2.0 endpoint for `<agentId>` (when `inbound.agents` is configured)                    |
 
 ### Supported JSON-RPC Methods
 
@@ -553,9 +560,19 @@ openclaw gateway restart
 
 Apache-2.0
 
-## 🤝 Join the A2A Net Community
+## 🤖 Join A2A Net
 
-A2A Net is a site to find and share AI agents and open-source community. Join to share your A2A agents, ask questions, stay up-to-date with the latest A2A news, be the first to hear about open-source releases, tutorials, and more!
+[A2A Net](https://a2anet.com) is an open-source community for the [A2A protocol](https://a2a-protocol.org/latest/) and platform to build AI agents for [Slack](https://slack.com/intl/en-gb/), [Microsoft 365 Copilot](https://m365.cloud.microsoft/), [Microsoft Teams](https://www.microsoft.com/microsoft-teams/), and [Gemini Enterprise](https://cloud.google.com/gemini-enterprise).
 
-- 🌍 Site: [A2A Net](https://a2anet.com)
-- 🤖 Discord: [Join the Discord](https://discord.gg/674NGXpAjU)
+[Join the Discord](https://discord.gg/674NGXpAjU) to share your project, ask questions, stay up-to-date with the latest news, be the first to hear about open-source releases, tutorials, and more!
+
+## 📦 A2A Net Packages
+
+- [a2a-cli](https://github.com/a2anet/a2a-cli) - A CLI for the Agent2Agent (A2A) protocol
+- [a2a-mcp](https://github.com/a2anet/a2a-mcp) - An MCP server for the A2A protocol
+- [a2a-ui](https://github.com/a2anet/a2a-ui) - A UI for the A2A protocol built with Next.js and Material UI
+- [a2a-utils](https://github.com/a2anet/a2a-utils) - A comprehensive set of utility functions for using A2A servers (remote agents), it powers the A2A MCP Server
+- [a2anet-js](https://github.com/a2anet/a2anet-js) - A pre-built A2A Agent Executor for OpenAI Agents JS SDK
+- [a2anet-python](https://github.com/a2anet/a2anet-python) - A pre-built A2A Agent Executor for LangGraph Python
+- [adk-code-mode](https://github.com/a2anet/adk-code-mode) - A Code Mode code executor for Agent Development Kit (ADK). Inspired by Cloudflare's Code Mode and Anthropic's Code execution with MCP
+- [openclaw-a2a-plugin](https://github.com/a2anet/openclaw-a2a-plugin) - OpenClaw A2A protocol community plugin. Send messages and files to other agents over the internet, and allow other people to connect to your agent with Tailscale
