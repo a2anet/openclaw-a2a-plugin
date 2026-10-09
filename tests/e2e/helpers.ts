@@ -174,8 +174,22 @@ export async function startGateway(config: GatewayConfig): Promise<Gateway> {
     const gatewayBase = { mode: "local", auth: { mode: "none" }, ...(config.gateway ?? {}) };
     writeFileSync(configPath, JSON.stringify({ gateway: gatewayBase }, null, 2));
 
-    const pluginInstall = spawnSync(openclawBin, ["plugins", "install", tarballPath], {
-        env: openclawChildEnv(home),
+    const childEnv = openclawChildEnv(home);
+    const installHelp = spawnSync(openclawBin, ["plugins", "install", "--help"], {
+        env: childEnv,
+        encoding: "utf8",
+    });
+    if (installHelp.status !== 0) {
+        throw new Error("failed to inspect openclaw plugin install options");
+    }
+    const installOptions = `${installHelp.stdout}\n${installHelp.stderr}`;
+    const installArgs = ["plugins", "install"];
+    if (installOptions.includes("--force")) installArgs.push("--force");
+    if (installOptions.includes("--accept-capabilities")) installArgs.push("--accept-capabilities");
+    installArgs.push(tarballPath);
+
+    const pluginInstall = spawnSync(openclawBin, installArgs, {
+        env: childEnv,
         stdio: "inherit",
     });
     if (pluginInstall.status !== 0) {
